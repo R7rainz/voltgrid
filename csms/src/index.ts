@@ -1,5 +1,12 @@
 import { Hono } from 'hono'
 import { upgradeWebSocket, websocket } from 'hono/bun'
+import {
+    getAllChargers,
+    markChargerConnected,
+    markChargerDisconnected,
+    markChargerSeen,
+    updateConnectorStatus,
+} from './modules/chargers/charger-state'
 
 const app = new Hono()
 
@@ -21,6 +28,7 @@ app.get(
 
         return {
             onOpen(_event, ws) {
+                markChargerConnected(String(chargerId))
                 console.log(`Charger connected: ${chargerId}`)
                 ws.send(`Connected to VoltGrid: ${chargerId}`)
             },
@@ -57,6 +65,8 @@ app.get(
 
                 console.log(`Received ${action} from ${chargerId}`)
 
+                markChargerSeen(String(chargerId))
+
                 if (action === 'Heartbeat') {
                     ws.send(
                         JSON.stringify([
@@ -73,11 +83,29 @@ app.get(
                 }
 
                 if (action === 'StatusNotification') {
+                    if (
+                        typeof payload !== 'object' ||
+                        payload === null ||
+                        Array.isArray(payload)
+                    ) {
+                        console.log('Invalid StatusNotification payload')
+                        return
+                    }
+
                     const statusPayload = payload as {
                         connectorId?: number
                         status?: string
                         errorCode?: string
                     }
+
+                    if (
+                        typeof statusPayload.connectorId !== 'number' || typeof statusPayload.status !== 'string' || typeof statusPayload.errorCode !== 'string'
+                    ) {
+                        console.log('Invalid StatusNotification payload')
+                        return
+                    }
+
+                updateConnectorStatus(String(chargerId), statusPayload.connectorId, statusPayload.status, statusPayload.errorCode)
 
                     console.log(
                         `Connector ${statusPayload.connectorId} on ${chargerId}: ${statusPayload.status}`,
@@ -124,6 +152,7 @@ app.get(
             },
 
             onClose() {
+                markChargerDisconnected(String(chargerId))
                 console.log(`Charger disconnected: ${chargerId}`)
             },
 
@@ -133,6 +162,12 @@ app.get(
         }
     }),
 )
+
+app.get('/api/chargers', (c) => {
+    return c.json({
+        chargers: getAllChargers(),
+    })
+})
 
 const port = Number(Bun.env.PORT ?? 8080)
 
