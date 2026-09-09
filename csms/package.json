@@ -1,0 +1,13 @@
+{
+  "name": "csms",
+  "scripts": {
+    "dev": "PORT=6773 bun run --hot src/index.ts",
+    "start": "PORT=6773 bun run src/index.ts"
+  },
+  "dependencies": {
+    "hono": "^4.13.7"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
