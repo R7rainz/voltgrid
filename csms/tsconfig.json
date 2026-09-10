@@ -1,8 +1,14 @@
 {
   "compilerOptions": {
     "strict": true,
-    "types": ["bun"],
+    "types": [
+      "bun",
+      "node"
+    ],
     "jsx": "react-jsx",
-    "jsxImportSource": "hono/jsx"
+    "jsxImportSource": "hono/jsx",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true
   }
 }

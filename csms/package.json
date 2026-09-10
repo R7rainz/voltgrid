@@ -1,13 +1,22 @@
 {
   "name": "csms",
+  "type": "module",
   "scripts": {
     "dev": "PORT=6773 bun run --hot src/index.ts",
-    "start": "PORT=6773 bun run src/index.ts"
+    "start": "PORT=6773 bun run src/index.ts",
+    "postinstall": "prisma skills sync || exit 0",
+    "contract:emit": "prisma contract emit"
   },
   "dependencies": {
+    "@prisma/orm-postgres": "^8.0.0-rc.9",
+    "dotenv": "^17.4.2",
     "hono": "^4.13.7"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@prisma/cli": "^8.0.0-rc.13",
+    "@prisma/cli-engine": "0.2.3",
+    "@types/bun": "latest",
+    "@types/node": "^22.20.2",
+    "prisma": "^8.0.0-rc.10"
   }
 }

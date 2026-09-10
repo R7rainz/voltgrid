@@ -1,0 +1,60 @@
+// use prisma-next
+
+model Site {
+  id           Int    @id @default(autoincrement())
+  name         String
+  powerLimitKw Float
+
+  chargers Charger[]
+
+  createdAt TimestamptzString @default(now())
+  updatedAt temporal.updatedAtString()
+}
+
+model Charger {
+  id            Int      @id @default(autoincrement())
+  chargePointId String   @unique
+  vendor        String?
+  model         String?
+  connected     Boolean  @default(false)
+  lastSeenAt    TimestamptzString?
+
+  siteId Int
+  site   Site @relation(fields: [siteId], references: [id])
+
+  connectors   Connector[]
+  ocppMessages OcppMessage[]
+
+  createdAt TimestamptzString @default(now())
+  updatedAt temporal.updatedAtString()
+}
+
+model Connector {
+  id              Int    @id @default(autoincrement())
+  connectorNumber Int
+  status          String @default("Unavailable")
+  errorCode       String @default("NoError")
+
+  chargerId        Int
+  charger          Charger @relation(fields: [chargerId], references: [id])
+
+  createdAt TimestamptzString @default(now())
+  updatedAt temporal.updatedAtString()
+
+  @@unique([chargerId, connectorNumber])
+}
+
+model OcppMessage {
+  id        Int    @id @default(autoincrement())
+  messageId String
+  action    String
+  direction String
+  payload   Json
+
+  chargerId Int
+  charger   Charger @relation(fields: [chargerId], references: [id])
+
+  receivedAt TimestamptzString @default(now())
+
+  @@unique([chargerId, messageId])
+}
