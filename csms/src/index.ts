@@ -7,6 +7,7 @@ import {
   markChargerSeen,
   updateConnectorStatus,
 } from "./modules/chargers/charger-state";
+import { db } from "./prisma/db";
 
 const app = new Hono();
 
@@ -33,7 +34,7 @@ app.get(
         ws.send(`Connected to VoltGrid: ${chargerId}`);
       },
 
-      onMessage(event, ws) {
+      async onMessage(event, ws) {
         if (typeof event.data !== "string") {
           return;
         }
@@ -125,19 +126,96 @@ app.get(
         }
 
         if (action === "BootNotification") {
-          ws.send(
-            JSON.stringify([
-              3,
-              uniqueId,
-              {
-                status: "Accepted",
-                currentTime: new Date().toISOString(),
-                interval: 300,
-              },
-            ]),
-          );
+          if (
+            typeof payload !== "object" ||
+            payload === null ||
+            Array.isArray(payload)
+          ) {
+            console.log("Invalid BootNotification payload");
+            return;
+          }
 
-          console.log(`BootNotification accepted for ${chargerId}`);
+          const bootPayload = payload as {
+            chargePointVendor?: unknown;
+            chargePointModel?: unknown;
+          };
+
+          if (
+            typeof bootPayload.chargePointVendor !== "string" ||
+            typeof bootPayload.chargePointModel !== "string"
+          ) {
+            console.log("Invalid BootNotification payload");
+            return;
+          }
+
+          try {
+            const site = await db.orm.public.Site.select("id").first();
+
+            if (!site) {
+              console.error("No site configured for charger registration");
+              ws.send(
+                JSON.stringify([
+                  3,
+                  uniqueId,
+                  {
+                    status: "Rejected",
+                    currentTime: new Date().toISOString(),
+                    interval: 300,
+                  },
+                ]),
+              );
+              return;
+            }
+
+            const now = new Date().toISOString();
+
+            await db.orm.public.Charger.where({
+              chargePointId: String(chargerId),
+            }).upsert({
+              create: {
+                chargePointId: String(chargerId),
+                vendor: bootPayload.chargePointVendor,
+                model: bootPayload.chargePointModel,
+                connected: true,
+                lastSeenAt: now,
+                siteId: site.id,
+              },
+              update: {
+                vendor: bootPayload.chargePointVendor,
+                model: bootPayload.chargePointModel,
+                connected: true,
+                lastSeenAt: now,
+              },
+            });
+
+            ws.send(
+              JSON.stringify([
+                3,
+                uniqueId,
+                {
+                  status: "Accepted",
+                  currentTime: now,
+                  interval: 300,
+                },
+              ]),
+            );
+
+            console.log(`BootNotification persisted for ${chargerId}`);
+          } catch (error) {
+            console.error(`Failed to persist charger ${chargerId}:`, error);
+            ws.send(
+              JSON.stringify([
+                3,
+                uniqueId,
+                {
+                  status: "Rejected",
+                  currentTime: new Date().toISOString(),
+                  interval: 300,
+                },
+              ]),
+            );
+          }
+
           return;
         }
 
