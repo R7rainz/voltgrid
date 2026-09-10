@@ -108,19 +108,73 @@ app.get(
             return;
           }
 
-          updateConnectorStatus(
-            String(chargerId),
-            statusPayload.connectorId,
-            statusPayload.status,
-            statusPayload.errorCode,
-          );
+          try {
+            const now = new Date().toISOString();
 
-          console.log(
-            `Connector ${statusPayload.connectorId} on ${chargerId}: ${statusPayload.status}`,
-          );
-          console.log(`Charger error code: ${statusPayload.errorCode}`);
+            const persisted = await db.transaction(async (tx) => {
+              const charger = await tx.orm.public.Charger
+                .select("id")
+                .where({ chargePointId: String(chargerId) })
+                .first();
 
-          ws.send(JSON.stringify([3, uniqueId, {}]));
+              if (!charger) {
+                return false;
+              }
+
+              await tx.orm.public.Connector
+                .where({
+                  chargerId: charger.id,
+                  connectorNumber: statusPayload.connectorId,
+                })
+                .upsert({
+                  create: {
+                    chargerId: charger.id,
+                    connectorNumber: statusPayload.connectorId,
+                    status: statusPayload.status,
+                    errorCode: statusPayload.errorCode,
+                  },
+                  update: {
+                    status: statusPayload.status,
+                    errorCode: statusPayload.errorCode,
+                  },
+                });
+
+              await tx.orm.public.Charger.where({ id: charger.id }).update({
+                connected: true,
+                lastSeenAt: now,
+              });
+
+              return true;
+            });
+
+            if (!persisted) {
+              console.error(
+                `Cannot persist status for unknown charger ${chargerId}`,
+              );
+              ws.send(JSON.stringify([3, uniqueId, {}]));
+              return;
+            }
+
+            updateConnectorStatus(
+              String(chargerId),
+              statusPayload.connectorId,
+              statusPayload.status,
+              statusPayload.errorCode,
+            );
+
+            console.log(
+              `Connector ${statusPayload.connectorId} on ${chargerId}: ${statusPayload.status}`,
+            );
+            console.log(`Charger error code: ${statusPayload.errorCode}`);
+
+            ws.send(JSON.stringify([3, uniqueId, {}]));
+          } catch (error) {
+            console.error(
+              `Failed to persist status for charger ${chargerId}:`,
+              error,
+            );
+            ws.send(JSON.stringify([3, uniqueId, {}]));
+          }
 
           return;
         }
