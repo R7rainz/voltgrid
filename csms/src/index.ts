@@ -8,6 +8,7 @@ import {
   updateConnectorStatus,
 } from "./modules/chargers/charger-state";
 import { db } from "./prisma/db";
+import type { JsonValue } from "@prisma/orm-postgres/target/codec-types";
 
 const app = new Hono();
 
@@ -99,10 +100,14 @@ app.get(
             errorCode?: string;
           };
 
+          const connectorId = statusPayload.connectorId;
+          const status = statusPayload.status;
+          const errorCode = statusPayload.errorCode;
+
           if (
-            typeof statusPayload.connectorId !== "number" ||
-            typeof statusPayload.status !== "string" ||
-            typeof statusPayload.errorCode !== "string"
+            typeof connectorId !== "number" ||
+            typeof status !== "string" ||
+            typeof errorCode !== "string"
           ) {
             console.log("Invalid StatusNotification payload");
             return;
@@ -121,27 +126,45 @@ app.get(
                 return false;
               }
 
-              await tx.orm.public.Connector
-                .where({
+              await tx.orm.public.Connector.upsert({
+                conflictOn: {
                   chargerId: charger.id,
-                  connectorNumber: statusPayload.connectorId,
-                })
-                .upsert({
-                  create: {
-                    chargerId: charger.id,
-                    connectorNumber: statusPayload.connectorId,
-                    status: statusPayload.status,
-                    errorCode: statusPayload.errorCode,
-                  },
-                  update: {
-                    status: statusPayload.status,
-                    errorCode: statusPayload.errorCode,
-                  },
-                });
+                  connectorNumber: connectorId,
+                },
+                create: {
+                  chargerId: charger.id,
+                  connectorNumber: connectorId,
+                  status,
+                  errorCode,
+                },
+                update: {
+                  status,
+                  errorCode,
+                },
+              });
 
               await tx.orm.public.Charger.where({ id: charger.id }).update({
                 connected: true,
                 lastSeenAt: now,
+              });
+
+              await tx.orm.public.OcppMessage.upsert({
+                conflictOn: {
+                  chargerId: charger.id,
+                  messageId: uniqueId,
+                },
+                create: {
+                  messageId: uniqueId,
+                  action,
+                  direction: "inbound",
+                  payload: payload as JsonValue,
+                  chargerId: charger.id,
+                },
+                update: {
+                  action,
+                  direction: "inbound",
+                  payload: payload as JsonValue,
+                },
               });
 
               return true;
@@ -157,15 +180,15 @@ app.get(
 
             updateConnectorStatus(
               String(chargerId),
-              statusPayload.connectorId,
-              statusPayload.status,
-              statusPayload.errorCode,
+              connectorId,
+              status,
+              errorCode,
             );
 
             console.log(
-              `Connector ${statusPayload.connectorId} on ${chargerId}: ${statusPayload.status}`,
+              `Connector ${connectorId} on ${chargerId}: ${status}`,
             );
-            console.log(`Charger error code: ${statusPayload.errorCode}`);
+            console.log(`Charger error code: ${errorCode}`);
 
             ws.send(JSON.stringify([3, uniqueId, {}]));
           } catch (error) {
@@ -202,10 +225,64 @@ app.get(
             return;
           }
 
-          try {
-            const site = await db.orm.public.Site.select("id").first();
+          const vendor = bootPayload.chargePointVendor;
+          const model = bootPayload.chargePointModel;
 
-            if (!site) {
+          try {
+            const now = new Date().toISOString();
+
+            const persisted = await db.transaction(async (tx) => {
+              const site = await tx.orm.public.Site.select("id").first();
+
+              if (!site) {
+                return false;
+              }
+
+              const charger = await tx.orm.public.Charger
+                .select("id")
+                .upsert({
+                  conflictOn: {
+                    chargePointId: String(chargerId),
+                  },
+                  create: {
+                    chargePointId: String(chargerId),
+                    vendor,
+                    model,
+                    connected: true,
+                    lastSeenAt: now,
+                    siteId: site.id,
+                  },
+                  update: {
+                    vendor,
+                    model,
+                    connected: true,
+                    lastSeenAt: now,
+                  },
+                });
+
+              await tx.orm.public.OcppMessage.upsert({
+                conflictOn: {
+                  chargerId: charger.id,
+                  messageId: uniqueId,
+                },
+                create: {
+                  messageId: uniqueId,
+                  action,
+                  direction: "inbound",
+                  payload: payload as JsonValue,
+                  chargerId: charger.id,
+                },
+                update: {
+                  action,
+                  direction: "inbound",
+                  payload: payload as JsonValue,
+                },
+              });
+
+              return true;
+            });
+
+            if (!persisted) {
               console.error("No site configured for charger registration");
               ws.send(
                 JSON.stringify([
@@ -220,27 +297,6 @@ app.get(
               );
               return;
             }
-
-            const now = new Date().toISOString();
-
-            await db.orm.public.Charger.where({
-              chargePointId: String(chargerId),
-            }).upsert({
-              create: {
-                chargePointId: String(chargerId),
-                vendor: bootPayload.chargePointVendor,
-                model: bootPayload.chargePointModel,
-                connected: true,
-                lastSeenAt: now,
-                siteId: site.id,
-              },
-              update: {
-                vendor: bootPayload.chargePointVendor,
-                model: bootPayload.chargePointModel,
-                connected: true,
-                lastSeenAt: now,
-              },
-            });
 
             ws.send(
               JSON.stringify([
