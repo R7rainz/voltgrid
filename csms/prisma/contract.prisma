@@ -27,6 +27,8 @@ model Charger {
 
   createdAt TimestamptzString @default(now())
   updatedAt temporal.updatedAtString()
+
+  sessions ChargingSession[]
 }
 
 model Connector {
@@ -40,6 +42,8 @@ model Connector {
 
   createdAt TimestamptzString @default(now())
   updatedAt temporal.updatedAtString()
+
+  sessions ChargingSession[]
 
   @@unique([chargerId, connectorNumber])
 }
@@ -57,4 +61,38 @@ model OcppMessage {
   receivedAt TimestamptzString @default(now())
 
   @@unique([chargerId, messageId])
+}
+
+model ChargingSession {
+  transactionId Int    @id @default(autoincrement())
+  idTag         String
+  status        String @default("Active")
+
+  meterStartWh Int
+  meterStopWh  Int?
+  lastMeterWh  Int?
+
+  startedAt TimestamptzString @default(now())
+  stoppedAt TimestamptzString?
+
+  chargerId Int
+  charger   Charger @relation(fields: [chargerId], references: [id])
+
+  connectorId Int
+  connector   Connector @relation(fields: [connectorId], references: [id])
+
+  meterReadings MeterReading[]
+
+  createdAt TimestamptzString @default(now())
+  updatedAt temporal.updatedAtString()
+}
+
+model MeterReading {
+  id        Int    @id @default(autoincrement())
+
+  meterWh    Int
+  recordedAt TimestamptzString @default(now())
+
+  sessionId Int
+  session   ChargingSession @relation(fields: [sessionId], references: [transactionId])
 }

@@ -33,9 +33,9 @@ import type {
 } from '@prisma/orm-postgres/contract/types';
 
 export type StorageHash =
-  StorageHashBase<'4bb6a072a800357f5d8a2121b16e9f4f1ecd05a6ace72dfb564d34ad01487147'>;
+  StorageHashBase<'707509f1f0f6c453885600b1596dcafbf7e0e5f3cf714bb1397b57b8f933d17f'>;
 export type ExecutionHash =
-  ExecutionHashBase<'acbc146d37f80ddb735a98d0cf9c8aa40ddf6e573cb011255d6544d12658bca3'>;
+  ExecutionHashBase<'31af339d7d05d87edd5a9c627e3755c21d2603062f964020da6824bd0e88c856'>;
 export type ProfileHash =
   ProfileHashBase<'3916f444a8a17ad749191acf9e08dad97d1a327b88c2f1d45d12f240296aa8b2'>;
 
@@ -252,6 +252,20 @@ export type FieldOutputTypes = {
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['output'];
     };
+    readonly ChargingSession: {
+      readonly transactionId: CodecTypes['pg/int4@1']['output'];
+      readonly idTag: CodecTypes['pg/text@1']['output'];
+      readonly status: CodecTypes['pg/text@1']['output'];
+      readonly meterStartWh: CodecTypes['pg/int4@1']['output'];
+      readonly meterStopWh: CodecTypes['pg/int4@1']['output'] | null;
+      readonly lastMeterWh: CodecTypes['pg/int4@1']['output'] | null;
+      readonly startedAt: CodecTypes['pg/timestamptz-string@1']['output'];
+      readonly stoppedAt: CodecTypes['pg/timestamptz-string@1']['output'] | null;
+      readonly chargerId: CodecTypes['pg/int4@1']['output'];
+      readonly connectorId: CodecTypes['pg/int4@1']['output'];
+      readonly createdAt: CodecTypes['pg/timestamptz-string@1']['output'];
+      readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['output'];
+    };
     readonly Connector: {
       readonly id: CodecTypes['pg/int4@1']['output'];
       readonly connectorNumber: CodecTypes['pg/int4@1']['output'];
@@ -260,6 +274,12 @@ export type FieldOutputTypes = {
       readonly chargerId: CodecTypes['pg/int4@1']['output'];
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['output'];
+    };
+    readonly MeterReading: {
+      readonly id: CodecTypes['pg/int4@1']['output'];
+      readonly meterWh: CodecTypes['pg/int4@1']['output'];
+      readonly recordedAt: CodecTypes['pg/timestamptz-string@1']['output'];
+      readonly sessionId: CodecTypes['pg/int4@1']['output'];
     };
     readonly OcppMessage: {
       readonly id: CodecTypes['pg/int4@1']['output'];
@@ -292,6 +312,20 @@ export type FieldInputTypes = {
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['input'];
     };
+    readonly ChargingSession: {
+      readonly transactionId: CodecTypes['pg/int4@1']['input'];
+      readonly idTag: CodecTypes['pg/text@1']['input'];
+      readonly status: CodecTypes['pg/text@1']['input'];
+      readonly meterStartWh: CodecTypes['pg/int4@1']['input'];
+      readonly meterStopWh: CodecTypes['pg/int4@1']['input'] | null;
+      readonly lastMeterWh: CodecTypes['pg/int4@1']['input'] | null;
+      readonly startedAt: CodecTypes['pg/timestamptz-string@1']['input'];
+      readonly stoppedAt: CodecTypes['pg/timestamptz-string@1']['input'] | null;
+      readonly chargerId: CodecTypes['pg/int4@1']['input'];
+      readonly connectorId: CodecTypes['pg/int4@1']['input'];
+      readonly createdAt: CodecTypes['pg/timestamptz-string@1']['input'];
+      readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['input'];
+    };
     readonly Connector: {
       readonly id: CodecTypes['pg/int4@1']['input'];
       readonly connectorNumber: CodecTypes['pg/int4@1']['input'];
@@ -300,6 +334,12 @@ export type FieldInputTypes = {
       readonly chargerId: CodecTypes['pg/int4@1']['input'];
       readonly createdAt: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['input'];
+    };
+    readonly MeterReading: {
+      readonly id: CodecTypes['pg/int4@1']['input'];
+      readonly meterWh: CodecTypes['pg/int4@1']['input'];
+      readonly recordedAt: CodecTypes['pg/timestamptz-string@1']['input'];
+      readonly sessionId: CodecTypes['pg/int4@1']['input'];
     };
     readonly OcppMessage: {
       readonly id: CodecTypes['pg/int4@1']['input'];
@@ -332,6 +372,20 @@ export type StorageColumnTypes = {
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['output'];
       readonly vendor: CodecTypes['pg/text@1']['output'] | null;
     };
+    readonly chargingSession: {
+      readonly chargerId: CodecTypes['pg/int4@1']['output'];
+      readonly connectorId: CodecTypes['pg/int4@1']['output'];
+      readonly createdAt: CodecTypes['pg/timestamptz-string@1']['output'];
+      readonly idTag: CodecTypes['pg/text@1']['output'];
+      readonly lastMeterWh: CodecTypes['pg/int4@1']['output'] | null;
+      readonly meterStartWh: CodecTypes['pg/int4@1']['output'];
+      readonly meterStopWh: CodecTypes['pg/int4@1']['output'] | null;
+      readonly startedAt: CodecTypes['pg/timestamptz-string@1']['output'];
+      readonly status: CodecTypes['pg/text@1']['output'];
+      readonly stoppedAt: CodecTypes['pg/timestamptz-string@1']['output'] | null;
+      readonly transactionId: CodecTypes['pg/int4@1']['output'];
+      readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['output'];
+    };
     readonly connector: {
       readonly chargerId: CodecTypes['pg/int4@1']['output'];
       readonly connectorNumber: CodecTypes['pg/int4@1']['output'];
@@ -340,6 +394,12 @@ export type StorageColumnTypes = {
       readonly id: CodecTypes['pg/int4@1']['output'];
       readonly status: CodecTypes['pg/text@1']['output'];
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['output'];
+    };
+    readonly meterReading: {
+      readonly id: CodecTypes['pg/int4@1']['output'];
+      readonly meterWh: CodecTypes['pg/int4@1']['output'];
+      readonly recordedAt: CodecTypes['pg/timestamptz-string@1']['output'];
+      readonly sessionId: CodecTypes['pg/int4@1']['output'];
     };
     readonly ocppMessage: {
       readonly action: CodecTypes['pg/text@1']['output'];
@@ -372,6 +432,20 @@ export type StorageColumnInputTypes = {
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['input'];
       readonly vendor: CodecTypes['pg/text@1']['input'] | null;
     };
+    readonly chargingSession: {
+      readonly chargerId: CodecTypes['pg/int4@1']['input'];
+      readonly connectorId: CodecTypes['pg/int4@1']['input'];
+      readonly createdAt: CodecTypes['pg/timestamptz-string@1']['input'];
+      readonly idTag: CodecTypes['pg/text@1']['input'];
+      readonly lastMeterWh: CodecTypes['pg/int4@1']['input'] | null;
+      readonly meterStartWh: CodecTypes['pg/int4@1']['input'];
+      readonly meterStopWh: CodecTypes['pg/int4@1']['input'] | null;
+      readonly startedAt: CodecTypes['pg/timestamptz-string@1']['input'];
+      readonly status: CodecTypes['pg/text@1']['input'];
+      readonly stoppedAt: CodecTypes['pg/timestamptz-string@1']['input'] | null;
+      readonly transactionId: CodecTypes['pg/int4@1']['input'];
+      readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['input'];
+    };
     readonly connector: {
       readonly chargerId: CodecTypes['pg/int4@1']['input'];
       readonly connectorNumber: CodecTypes['pg/int4@1']['input'];
@@ -380,6 +454,12 @@ export type StorageColumnInputTypes = {
       readonly id: CodecTypes['pg/int4@1']['input'];
       readonly status: CodecTypes['pg/text@1']['input'];
       readonly updatedAt: CodecTypes['pg/timestamptz-string@1']['input'];
+    };
+    readonly meterReading: {
+      readonly id: CodecTypes['pg/int4@1']['input'];
+      readonly meterWh: CodecTypes['pg/int4@1']['input'];
+      readonly recordedAt: CodecTypes['pg/timestamptz-string@1']['input'];
+      readonly sessionId: CodecTypes['pg/int4@1']['input'];
     };
     readonly ocppMessage: {
       readonly action: CodecTypes['pg/text@1']['input'];
@@ -499,6 +579,122 @@ type ContractBase = Omit<
                 },
               ];
             };
+            readonly chargingSession: {
+              columns: {
+                readonly transactionId: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: false;
+                  readonly default: {
+                    readonly kind: 'function';
+                    readonly expression: 'autoincrement()';
+                  };
+                };
+                readonly idTag: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: false;
+                };
+                readonly status: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'pg/text@1';
+                  readonly nullable: false;
+                  readonly default: {
+                    readonly kind: 'literal';
+                    readonly value: DefaultLiteralValue<'pg/text@1', 'Active'>;
+                  };
+                };
+                readonly meterStartWh: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: false;
+                };
+                readonly meterStopWh: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: true;
+                };
+                readonly lastMeterWh: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: true;
+                };
+                readonly startedAt: {
+                  readonly nativeType: 'timestamptz';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                  readonly nullable: false;
+                  readonly default: { readonly kind: 'function'; readonly expression: 'now()' };
+                };
+                readonly stoppedAt: {
+                  readonly nativeType: 'timestamptz';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                  readonly nullable: true;
+                };
+                readonly chargerId: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: false;
+                };
+                readonly connectorId: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: false;
+                };
+                readonly createdAt: {
+                  readonly nativeType: 'timestamptz';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                  readonly nullable: false;
+                  readonly default: { readonly kind: 'function'; readonly expression: 'now()' };
+                };
+                readonly updatedAt: {
+                  readonly nativeType: 'timestamptz';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                  readonly nullable: false;
+                };
+              };
+              primaryKey: { readonly columns: readonly ['transactionId'] };
+              uniques: readonly [];
+              indexes: readonly [
+                {
+                  readonly name: 'chargingSession_chargerId_idx_e6d4df28';
+                  readonly prefix: 'chargingSession_chargerId_idx';
+                  readonly columns: readonly ['chargerId'];
+                  readonly unique: false;
+                },
+                {
+                  readonly name: 'chargingSession_connectorId_idx_a980b131';
+                  readonly prefix: 'chargingSession_connectorId_idx';
+                  readonly columns: readonly ['connectorId'];
+                  readonly unique: false;
+                },
+              ];
+              foreignKeys: readonly [
+                {
+                  readonly source: {
+                    readonly namespaceId: 'public' & NamespaceId;
+                    readonly tableName: 'chargingSession';
+                    readonly columns: readonly ['chargerId'];
+                  };
+                  readonly target: {
+                    readonly namespaceId: 'public' & NamespaceId;
+                    readonly tableName: 'charger';
+                    readonly columns: readonly ['id'];
+                  };
+                },
+                {
+                  readonly source: {
+                    readonly namespaceId: 'public' & NamespaceId;
+                    readonly tableName: 'chargingSession';
+                    readonly columns: readonly ['connectorId'];
+                  };
+                  readonly target: {
+                    readonly namespaceId: 'public' & NamespaceId;
+                    readonly tableName: 'connector';
+                    readonly columns: readonly ['id'];
+                  };
+                },
+              ];
+            };
             readonly connector: {
               columns: {
                 readonly id: {
@@ -571,6 +767,59 @@ type ContractBase = Omit<
                     readonly namespaceId: 'public' & NamespaceId;
                     readonly tableName: 'charger';
                     readonly columns: readonly ['id'];
+                  };
+                },
+              ];
+            };
+            readonly meterReading: {
+              columns: {
+                readonly id: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: false;
+                  readonly default: {
+                    readonly kind: 'function';
+                    readonly expression: 'autoincrement()';
+                  };
+                };
+                readonly meterWh: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: false;
+                };
+                readonly recordedAt: {
+                  readonly nativeType: 'timestamptz';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                  readonly nullable: false;
+                  readonly default: { readonly kind: 'function'; readonly expression: 'now()' };
+                };
+                readonly sessionId: {
+                  readonly nativeType: 'int4';
+                  readonly codecId: 'pg/int4@1';
+                  readonly nullable: false;
+                };
+              };
+              primaryKey: { readonly columns: readonly ['id'] };
+              uniques: readonly [];
+              indexes: readonly [
+                {
+                  readonly name: 'meterReading_sessionId_idx_29f415d4';
+                  readonly prefix: 'meterReading_sessionId_idx';
+                  readonly columns: readonly ['sessionId'];
+                  readonly unique: false;
+                },
+              ];
+              foreignKeys: readonly [
+                {
+                  readonly source: {
+                    readonly namespaceId: 'public' & NamespaceId;
+                    readonly tableName: 'meterReading';
+                    readonly columns: readonly ['sessionId'];
+                  };
+                  readonly target: {
+                    readonly namespaceId: 'public' & NamespaceId;
+                    readonly tableName: 'chargingSession';
+                    readonly columns: readonly ['transactionId'];
                   };
                 },
               ];
@@ -699,6 +948,14 @@ type ContractBase = Omit<
       readonly namespace: 'public' & NamespaceId;
       readonly model: 'OcppMessage';
     };
+    readonly chargingSession: {
+      readonly namespace: 'public' & NamespaceId;
+      readonly model: 'ChargingSession';
+    };
+    readonly meterReading: {
+      readonly namespace: 'public' & NamespaceId;
+      readonly model: 'MeterReading';
+    };
   };
   readonly domain: {
     readonly namespaces: {
@@ -775,6 +1032,17 @@ type ContractBase = Omit<
                   readonly targetFields: readonly ['chargerId'];
                 };
               };
+              readonly sessions: {
+                readonly to: {
+                  readonly namespace: 'public' & NamespaceId;
+                  readonly model: 'ChargingSession';
+                };
+                readonly cardinality: '1:N';
+                readonly on: {
+                  readonly localFields: readonly ['id'];
+                  readonly targetFields: readonly ['chargerId'];
+                };
+              };
               readonly site: {
                 readonly to: { readonly namespace: 'public' & NamespaceId; readonly model: 'Site' };
                 readonly cardinality: 'N:1';
@@ -795,6 +1063,123 @@ type ContractBase = Omit<
                 readonly connected: { readonly column: 'connected' };
                 readonly lastSeenAt: { readonly column: 'lastSeenAt' };
                 readonly siteId: { readonly column: 'siteId' };
+                readonly createdAt: { readonly column: 'createdAt' };
+                readonly updatedAt: { readonly column: 'updatedAt' };
+              };
+            };
+          };
+          readonly ChargingSession: {
+            readonly fields: {
+              readonly transactionId: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
+              readonly idTag: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly status: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/text@1' };
+              };
+              readonly meterStartWh: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
+              readonly meterStopWh: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
+              readonly lastMeterWh: {
+                readonly nullable: true;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
+              readonly startedAt: {
+                readonly nullable: false;
+                readonly type: {
+                  readonly kind: 'scalar';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                };
+              };
+              readonly stoppedAt: {
+                readonly nullable: true;
+                readonly type: {
+                  readonly kind: 'scalar';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                };
+              };
+              readonly chargerId: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
+              readonly connectorId: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
+              readonly createdAt: {
+                readonly nullable: false;
+                readonly type: {
+                  readonly kind: 'scalar';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                };
+              };
+              readonly updatedAt: {
+                readonly nullable: false;
+                readonly type: {
+                  readonly kind: 'scalar';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                };
+              };
+            };
+            readonly relations: {
+              readonly charger: {
+                readonly to: {
+                  readonly namespace: 'public' & NamespaceId;
+                  readonly model: 'Charger';
+                };
+                readonly cardinality: 'N:1';
+                readonly on: {
+                  readonly localFields: readonly ['chargerId'];
+                  readonly targetFields: readonly ['id'];
+                };
+              };
+              readonly connector: {
+                readonly to: {
+                  readonly namespace: 'public' & NamespaceId;
+                  readonly model: 'Connector';
+                };
+                readonly cardinality: 'N:1';
+                readonly on: {
+                  readonly localFields: readonly ['connectorId'];
+                  readonly targetFields: readonly ['id'];
+                };
+              };
+              readonly meterReadings: {
+                readonly to: {
+                  readonly namespace: 'public' & NamespaceId;
+                  readonly model: 'MeterReading';
+                };
+                readonly cardinality: '1:N';
+                readonly on: {
+                  readonly localFields: readonly ['transactionId'];
+                  readonly targetFields: readonly ['sessionId'];
+                };
+              };
+            };
+            readonly storage: {
+              readonly table: 'chargingSession';
+              readonly namespaceId: 'public';
+              readonly fields: {
+                readonly transactionId: { readonly column: 'transactionId' };
+                readonly idTag: { readonly column: 'idTag' };
+                readonly status: { readonly column: 'status' };
+                readonly meterStartWh: { readonly column: 'meterStartWh' };
+                readonly meterStopWh: { readonly column: 'meterStopWh' };
+                readonly lastMeterWh: { readonly column: 'lastMeterWh' };
+                readonly startedAt: { readonly column: 'startedAt' };
+                readonly stoppedAt: { readonly column: 'stoppedAt' };
+                readonly chargerId: { readonly column: 'chargerId' };
+                readonly connectorId: { readonly column: 'connectorId' };
                 readonly createdAt: { readonly column: 'createdAt' };
                 readonly updatedAt: { readonly column: 'updatedAt' };
               };
@@ -849,6 +1234,17 @@ type ContractBase = Omit<
                   readonly targetFields: readonly ['id'];
                 };
               };
+              readonly sessions: {
+                readonly to: {
+                  readonly namespace: 'public' & NamespaceId;
+                  readonly model: 'ChargingSession';
+                };
+                readonly cardinality: '1:N';
+                readonly on: {
+                  readonly localFields: readonly ['id'];
+                  readonly targetFields: readonly ['connectorId'];
+                };
+              };
             };
             readonly storage: {
               readonly table: 'connector';
@@ -861,6 +1257,52 @@ type ContractBase = Omit<
                 readonly chargerId: { readonly column: 'chargerId' };
                 readonly createdAt: { readonly column: 'createdAt' };
                 readonly updatedAt: { readonly column: 'updatedAt' };
+              };
+            };
+          };
+          readonly MeterReading: {
+            readonly fields: {
+              readonly id: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
+              readonly meterWh: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
+              readonly recordedAt: {
+                readonly nullable: false;
+                readonly type: {
+                  readonly kind: 'scalar';
+                  readonly codecId: 'pg/timestamptz-string@1';
+                };
+              };
+              readonly sessionId: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'pg/int4@1' };
+              };
+            };
+            readonly relations: {
+              readonly session: {
+                readonly to: {
+                  readonly namespace: 'public' & NamespaceId;
+                  readonly model: 'ChargingSession';
+                };
+                readonly cardinality: 'N:1';
+                readonly on: {
+                  readonly localFields: readonly ['sessionId'];
+                  readonly targetFields: readonly ['transactionId'];
+                };
+              };
+            };
+            readonly storage: {
+              readonly table: 'meterReading';
+              readonly namespaceId: 'public';
+              readonly fields: {
+                readonly id: { readonly column: 'id' };
+                readonly meterWh: { readonly column: 'meterWh' };
+                readonly recordedAt: { readonly column: 'recordedAt' };
+                readonly sessionId: { readonly column: 'sessionId' };
               };
             };
           };
@@ -1010,6 +1452,15 @@ type ContractBase = Omit<
           readonly ref: {
             readonly namespace: 'public';
             readonly table: 'charger';
+            readonly column: 'updatedAt';
+          };
+          readonly onCreate: { readonly kind: 'generator'; readonly id: 'timestampNow' };
+          readonly onUpdate: { readonly kind: 'generator'; readonly id: 'timestampNow' };
+        },
+        {
+          readonly ref: {
+            readonly namespace: 'public';
+            readonly table: 'chargingSession';
             readonly column: 'updatedAt';
           };
           readonly onCreate: { readonly kind: 'generator'; readonly id: 'timestampNow' };

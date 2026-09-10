@@ -8,8 +8,16 @@
       "model": "Charger",
       "namespace": "public"
     },
+    "chargingSession": {
+      "model": "ChargingSession",
+      "namespace": "public"
+    },
     "connector": {
       "model": "Connector",
+      "namespace": "public"
+    },
+    "meterReading": {
+      "model": "MeterReading",
       "namespace": "public"
     },
     "ocppMessage": {
@@ -122,6 +130,21 @@
                   "namespace": "public"
                 }
               },
+              "sessions": {
+                "cardinality": "1:N",
+                "on": {
+                  "localFields": [
+                    "id"
+                  ],
+                  "targetFields": [
+                    "chargerId"
+                  ]
+                },
+                "to": {
+                  "model": "ChargingSession",
+                  "namespace": "public"
+                }
+              },
               "site": {
                 "cardinality": "N:1",
                 "on": {
@@ -170,6 +193,183 @@
               },
               "namespaceId": "public",
               "table": "charger"
+            }
+          },
+          "ChargingSession": {
+            "fields": {
+              "chargerId": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "connectorId": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "createdAt": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "kind": "scalar"
+                }
+              },
+              "idTag": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "lastMeterWh": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "meterStartWh": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "meterStopWh": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "startedAt": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "kind": "scalar"
+                }
+              },
+              "status": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "stoppedAt": {
+                "nullable": true,
+                "type": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "kind": "scalar"
+                }
+              },
+              "transactionId": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "updatedAt": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "kind": "scalar"
+                }
+              }
+            },
+            "relations": {
+              "charger": {
+                "cardinality": "N:1",
+                "on": {
+                  "localFields": [
+                    "chargerId"
+                  ],
+                  "targetFields": [
+                    "id"
+                  ]
+                },
+                "to": {
+                  "model": "Charger",
+                  "namespace": "public"
+                }
+              },
+              "connector": {
+                "cardinality": "N:1",
+                "on": {
+                  "localFields": [
+                    "connectorId"
+                  ],
+                  "targetFields": [
+                    "id"
+                  ]
+                },
+                "to": {
+                  "model": "Connector",
+                  "namespace": "public"
+                }
+              },
+              "meterReadings": {
+                "cardinality": "1:N",
+                "on": {
+                  "localFields": [
+                    "transactionId"
+                  ],
+                  "targetFields": [
+                    "sessionId"
+                  ]
+                },
+                "to": {
+                  "model": "MeterReading",
+                  "namespace": "public"
+                }
+              }
+            },
+            "storage": {
+              "fields": {
+                "chargerId": {
+                  "column": "chargerId"
+                },
+                "connectorId": {
+                  "column": "connectorId"
+                },
+                "createdAt": {
+                  "column": "createdAt"
+                },
+                "idTag": {
+                  "column": "idTag"
+                },
+                "lastMeterWh": {
+                  "column": "lastMeterWh"
+                },
+                "meterStartWh": {
+                  "column": "meterStartWh"
+                },
+                "meterStopWh": {
+                  "column": "meterStopWh"
+                },
+                "startedAt": {
+                  "column": "startedAt"
+                },
+                "status": {
+                  "column": "status"
+                },
+                "stoppedAt": {
+                  "column": "stoppedAt"
+                },
+                "transactionId": {
+                  "column": "transactionId"
+                },
+                "updatedAt": {
+                  "column": "updatedAt"
+                }
+              },
+              "namespaceId": "public",
+              "table": "chargingSession"
             }
           },
           "Connector": {
@@ -239,6 +439,21 @@
                   "model": "Charger",
                   "namespace": "public"
                 }
+              },
+              "sessions": {
+                "cardinality": "1:N",
+                "on": {
+                  "localFields": [
+                    "id"
+                  ],
+                  "targetFields": [
+                    "connectorId"
+                  ]
+                },
+                "to": {
+                  "model": "ChargingSession",
+                  "namespace": "public"
+                }
               }
             },
             "storage": {
@@ -267,6 +482,73 @@
               },
               "namespaceId": "public",
               "table": "connector"
+            }
+          },
+          "MeterReading": {
+            "fields": {
+              "id": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "meterWh": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "recordedAt": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "kind": "scalar"
+                }
+              },
+              "sessionId": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              }
+            },
+            "relations": {
+              "session": {
+                "cardinality": "N:1",
+                "on": {
+                  "localFields": [
+                    "sessionId"
+                  ],
+                  "targetFields": [
+                    "transactionId"
+                  ]
+                },
+                "to": {
+                  "model": "ChargingSession",
+                  "namespace": "public"
+                }
+              }
+            },
+            "storage": {
+              "fields": {
+                "id": {
+                  "column": "id"
+                },
+                "meterWh": {
+                  "column": "meterWh"
+                },
+                "recordedAt": {
+                  "column": "recordedAt"
+                },
+                "sessionId": {
+                  "column": "sessionId"
+                }
+              },
+              "namespaceId": "public",
+              "table": "meterReading"
             }
           },
           "OcppMessage": {
@@ -553,6 +835,144 @@
                 }
               ]
             },
+            "chargingSession": {
+              "columns": {
+                "chargerId": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "connectorId": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "createdAt": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "default": {
+                    "expression": "now()",
+                    "kind": "function"
+                  },
+                  "nativeType": "timestamptz",
+                  "nullable": false
+                },
+                "idTag": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "lastMeterWh": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": true
+                },
+                "meterStartWh": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "meterStopWh": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": true
+                },
+                "startedAt": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "default": {
+                    "expression": "now()",
+                    "kind": "function"
+                  },
+                  "nativeType": "timestamptz",
+                  "nullable": false
+                },
+                "status": {
+                  "codecId": "pg/text@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": "Active"
+                  },
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "stoppedAt": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "nativeType": "timestamptz",
+                  "nullable": true
+                },
+                "transactionId": {
+                  "codecId": "pg/int4@1",
+                  "default": {
+                    "expression": "autoincrement()",
+                    "kind": "function"
+                  },
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "updatedAt": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "nativeType": "timestamptz",
+                  "nullable": false
+                }
+              },
+              "foreignKeys": [
+                {
+                  "source": {
+                    "columns": [
+                      "chargerId"
+                    ],
+                    "namespaceId": "public",
+                    "tableName": "chargingSession"
+                  },
+                  "target": {
+                    "columns": [
+                      "id"
+                    ],
+                    "namespaceId": "public",
+                    "tableName": "charger"
+                  }
+                },
+                {
+                  "source": {
+                    "columns": [
+                      "connectorId"
+                    ],
+                    "namespaceId": "public",
+                    "tableName": "chargingSession"
+                  },
+                  "target": {
+                    "columns": [
+                      "id"
+                    ],
+                    "namespaceId": "public",
+                    "tableName": "connector"
+                  }
+                }
+              ],
+              "indexes": [
+                {
+                  "columns": [
+                    "chargerId"
+                  ],
+                  "name": "chargingSession_chargerId_idx_e6d4df28",
+                  "prefix": "chargingSession_chargerId_idx",
+                  "unique": false
+                },
+                {
+                  "columns": [
+                    "connectorId"
+                  ],
+                  "name": "chargingSession_connectorId_idx_a980b131",
+                  "prefix": "chargingSession_connectorId_idx",
+                  "unique": false
+                }
+              ],
+              "primaryKey": {
+                "columns": [
+                  "transactionId"
+                ]
+              },
+              "uniques": []
+            },
             "connector": {
               "columns": {
                 "chargerId": {
@@ -648,6 +1068,72 @@
                   ]
                 }
               ]
+            },
+            "meterReading": {
+              "columns": {
+                "id": {
+                  "codecId": "pg/int4@1",
+                  "default": {
+                    "expression": "autoincrement()",
+                    "kind": "function"
+                  },
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "meterWh": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "recordedAt": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "default": {
+                    "expression": "now()",
+                    "kind": "function"
+                  },
+                  "nativeType": "timestamptz",
+                  "nullable": false
+                },
+                "sessionId": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": false
+                }
+              },
+              "foreignKeys": [
+                {
+                  "source": {
+                    "columns": [
+                      "sessionId"
+                    ],
+                    "namespaceId": "public",
+                    "tableName": "meterReading"
+                  },
+                  "target": {
+                    "columns": [
+                      "transactionId"
+                    ],
+                    "namespaceId": "public",
+                    "tableName": "chargingSession"
+                  }
+                }
+              ],
+              "indexes": [
+                {
+                  "columns": [
+                    "sessionId"
+                  ],
+                  "name": "meterReading_sessionId_idx_29f415d4",
+                  "prefix": "meterReading_sessionId_idx",
+                  "unique": false
+                }
+              ],
+              "primaryKey": {
+                "columns": [
+                  "id"
+                ]
+              },
+              "uniques": []
             },
             "ocppMessage": {
               "columns": {
@@ -788,10 +1274,10 @@
         "kind": "postgres-schema"
       }
     },
-    "storageHash": "4bb6a072a800357f5d8a2121b16e9f4f1ecd05a6ace72dfb564d34ad01487147"
+    "storageHash": "707509f1f0f6c453885600b1596dcafbf7e0e5f3cf714bb1397b57b8f933d17f"
   },
   "execution": {
-    "executionHash": "acbc146d37f80ddb735a98d0cf9c8aa40ddf6e573cb011255d6544d12658bca3",
+    "executionHash": "31af339d7d05d87edd5a9c627e3755c21d2603062f964020da6824bd0e88c856",
     "mutations": {
       "defaults": [
         {
@@ -807,6 +1293,21 @@
             "column": "updatedAt",
             "namespace": "public",
             "table": "charger"
+          }
+        },
+        {
+          "onCreate": {
+            "id": "timestampNow",
+            "kind": "generator"
+          },
+          "onUpdate": {
+            "id": "timestampNow",
+            "kind": "generator"
+          },
+          "ref": {
+            "column": "updatedAt",
+            "namespace": "public",
+            "table": "chargingSession"
           }
         },
         {
