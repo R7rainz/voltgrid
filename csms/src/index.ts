@@ -5,7 +5,7 @@ const port = Number(Bun.env.PORT ?? 8080);
 
 export { app };
 export default {
-  port,
-  fetch: app.fetch,
-  websocket,
+    port,
+    fetch: app.fetch,
+    websocket,
 };

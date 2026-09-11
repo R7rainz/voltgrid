@@ -1,25 +1,25 @@
 export type ConnectorState = {
-    connectorId: number
-    status: string
-    errorCode: string
-    updatedAt: string
-}
+    connectorId: number;
+    status: string;
+    errorCode: string;
+    updatedAt: string;
+};
 
 export type ChargerState = {
-    chargerId: string
-    connected: boolean
-    lastSeenAt: string
-    connectors: Record<string, ConnectorState>
-}
+    chargerId: string;
+    connected: boolean;
+    lastSeenAt: string;
+    connectors: Record<string, ConnectorState>;
+};
 
-const chargers = new Map<string, ChargerState>()
+const chargers = new Map<string, ChargerState>();
 
 function now() {
-    return new Date().toISOString()
+    return new Date().toISOString();
 }
 
 export function getOrCreateCharger(chargerId: string) {
-    let charger = chargers.get(chargerId)
+    let charger = chargers.get(chargerId);
 
     if (!charger) {
         charger = {
@@ -27,55 +27,60 @@ export function getOrCreateCharger(chargerId: string) {
             connected: false,
             lastSeenAt: now(),
             connectors: {},
-        }
+        };
 
-        chargers.set(chargerId, charger)
+        chargers.set(chargerId, charger);
     }
 
-    return charger
+    return charger;
 }
 
 export function markChargerConnected(chargerId: string) {
-    const charger = getOrCreateCharger(chargerId)
+    const charger = getOrCreateCharger(chargerId);
 
-    charger.connected = true
-    charger.lastSeenAt = now()
+    charger.connected = true;
+    charger.lastSeenAt = now();
 
-    return charger
+    return charger;
 }
 
 export function markChargerSeen(chargerId: string) {
-    const charger = getOrCreateCharger(chargerId)
+    const charger = getOrCreateCharger(chargerId);
 
-    charger.lastSeenAt = now()
+    charger.lastSeenAt = now();
 
-    return charger
+    return charger;
 }
 
 export function markChargerDisconnected(chargerId: string) {
-    const charger = getOrCreateCharger(chargerId)
+    const charger = getOrCreateCharger(chargerId);
 
-    charger.connected = false
-    charger.lastSeenAt = now()
+    charger.connected = false;
+    charger.lastSeenAt = now();
 
-    return charger
+    return charger;
 }
 
-export function updateConnectorStatus(chargerId: string, connectorId: number, status: string, errorCode: string) {
-    const charger = getOrCreateCharger(chargerId)
+export function updateConnectorStatus(
+    chargerId: string,
+    connectorId: number,
+    status: string,
+    errorCode: string,
+) {
+    const charger = getOrCreateCharger(chargerId);
 
     charger.connectors[String(connectorId)] = {
         connectorId,
         status,
         errorCode,
-        updatedAt: now()
-    }
+        updatedAt: now(),
+    };
 
-    charger.lastSeenAt = now()
+    charger.lastSeenAt = now();
 
-    return charger
+    return charger;
 }
 
 export function getAllChargers() {
-    return Array.from(chargers.values())
+    return Array.from(chargers.values());
 }
