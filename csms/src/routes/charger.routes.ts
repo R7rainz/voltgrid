@@ -10,6 +10,74 @@ chargerRoutes.get("/chargers", (c) => {
     });
 });
 
+chargerRoutes.get("/site", async (c) => {
+    try {
+        const site = await db.orm.public.Site.select(
+            "id",
+            "name",
+            "powerLimitKw",
+            "tariffPaisePerKwh",
+        ).first();
+
+        if (!site) {
+            return c.json({ error: "Site not configured" }, 404);
+        }
+
+        return c.json({ site });
+    } catch (error) {
+        console.error("Failed to load site configuration:", error);
+        return c.json({ error: "Could not load site configuration" }, 500);
+    }
+});
+
+chargerRoutes.patch("/site", async (c) => {
+    const payload = await c.req
+        .json<{
+            powerLimitKw?: unknown;
+            tariffPaisePerKwh?: unknown;
+        }>()
+        .catch(() => null);
+
+    if (
+        !payload ||
+        typeof payload.powerLimitKw !== "number" ||
+        !Number.isFinite(payload.powerLimitKw) ||
+        payload.powerLimitKw < 0 ||
+        typeof payload.tariffPaisePerKwh !== "number" ||
+        !Number.isInteger(payload.tariffPaisePerKwh) ||
+        payload.tariffPaisePerKwh < 0
+    ) {
+        return c.json({ error: "Invalid site capacity or tariff" }, 400);
+    }
+
+    try {
+        const currentSite = await db.orm.public.Site.select("id").first();
+
+        if (!currentSite) {
+            return c.json({ error: "Site not configured" }, 404);
+        }
+
+        await db.orm.public.Site.where({ id: currentSite.id }).update({
+            powerLimitKw: payload.powerLimitKw,
+            tariffPaisePerKwh: payload.tariffPaisePerKwh,
+        });
+
+        const site = await db.orm.public.Site.select(
+            "id",
+            "name",
+            "powerLimitKw",
+            "tariffPaisePerKwh",
+        )
+            .where({ id: currentSite.id })
+            .first();
+
+        return c.json({ site });
+    } catch (error) {
+        console.error("Failed to update site configuration:", error);
+        return c.json({ error: "Could not update site configuration" }, 500);
+    }
+});
+
 chargerRoutes.get("/sessions/:transactionId/invoice", async (c) => {
     const transactionId = Number(c.req.param("transactionId"));
 
