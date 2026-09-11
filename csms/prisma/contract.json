@@ -16,6 +16,10 @@
       "model": "Connector",
       "namespace": "public"
     },
+    "invoice": {
+      "model": "Invoice",
+      "namespace": "public"
+    },
     "meterReading": {
       "model": "MeterReading",
       "namespace": "public"
@@ -313,6 +317,21 @@
                   "namespace": "public"
                 }
               },
+              "invoice": {
+                "cardinality": "1:1",
+                "on": {
+                  "localFields": [
+                    "transactionId"
+                  ],
+                  "targetFields": [
+                    "sessionId"
+                  ]
+                },
+                "to": {
+                  "model": "Invoice",
+                  "namespace": "public"
+                }
+              },
               "meterReadings": {
                 "cardinality": "1:N",
                 "on": {
@@ -482,6 +501,113 @@
               },
               "namespaceId": "public",
               "table": "connector"
+            }
+          },
+          "Invoice": {
+            "fields": {
+              "amountPaise": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "currency": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "energyWh": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "id": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "issuedAt": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "kind": "scalar"
+                }
+              },
+              "sessionId": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
+              "status": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "tariffPaisePerKwh": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              }
+            },
+            "relations": {
+              "session": {
+                "cardinality": "N:1",
+                "on": {
+                  "localFields": [
+                    "sessionId"
+                  ],
+                  "targetFields": [
+                    "transactionId"
+                  ]
+                },
+                "to": {
+                  "model": "ChargingSession",
+                  "namespace": "public"
+                }
+              }
+            },
+            "storage": {
+              "fields": {
+                "amountPaise": {
+                  "column": "amountPaise"
+                },
+                "currency": {
+                  "column": "currency"
+                },
+                "energyWh": {
+                  "column": "energyWh"
+                },
+                "id": {
+                  "column": "id"
+                },
+                "issuedAt": {
+                  "column": "issuedAt"
+                },
+                "sessionId": {
+                  "column": "sessionId"
+                },
+                "status": {
+                  "column": "status"
+                },
+                "tariffPaisePerKwh": {
+                  "column": "tariffPaisePerKwh"
+                }
+              },
+              "namespaceId": "public",
+              "table": "invoice"
             }
           },
           "MeterReading": {
@@ -678,6 +804,13 @@
                   "kind": "scalar"
                 }
               },
+              "tariffPaisePerKwh": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/int4@1",
+                  "kind": "scalar"
+                }
+              },
               "updatedAt": {
                 "nullable": false,
                 "type": {
@@ -716,6 +849,9 @@
                 },
                 "powerLimitKw": {
                   "column": "powerLimitKw"
+                },
+                "tariffPaisePerKwh": {
+                  "column": "tariffPaisePerKwh"
                 },
                 "updatedAt": {
                   "column": "updatedAt"
@@ -1069,6 +1205,97 @@
                 }
               ]
             },
+            "invoice": {
+              "columns": {
+                "amountPaise": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "currency": {
+                  "codecId": "pg/text@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": "INR"
+                  },
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "energyWh": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "id": {
+                  "codecId": "pg/int4@1",
+                  "default": {
+                    "expression": "autoincrement()",
+                    "kind": "function"
+                  },
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "issuedAt": {
+                  "codecId": "pg/timestamptz-string@1",
+                  "default": {
+                    "expression": "now()",
+                    "kind": "function"
+                  },
+                  "nativeType": "timestamptz",
+                  "nullable": false
+                },
+                "sessionId": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": false
+                },
+                "status": {
+                  "codecId": "pg/text@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": "Issued"
+                  },
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "tariffPaisePerKwh": {
+                  "codecId": "pg/int4@1",
+                  "nativeType": "int4",
+                  "nullable": false
+                }
+              },
+              "foreignKeys": [
+                {
+                  "source": {
+                    "columns": [
+                      "sessionId"
+                    ],
+                    "namespaceId": "public",
+                    "tableName": "invoice"
+                  },
+                  "target": {
+                    "columns": [
+                      "transactionId"
+                    ],
+                    "namespaceId": "public",
+                    "tableName": "chargingSession"
+                  }
+                }
+              ],
+              "indexes": [],
+              "primaryKey": {
+                "columns": [
+                  "id"
+                ]
+              },
+              "uniques": [
+                {
+                  "columns": [
+                    "sessionId"
+                  ]
+                }
+              ]
+            },
             "meterReading": {
               "columns": {
                 "id": {
@@ -1253,6 +1480,15 @@
                   "nativeType": "float8",
                   "nullable": false
                 },
+                "tariffPaisePerKwh": {
+                  "codecId": "pg/int4@1",
+                  "default": {
+                    "kind": "literal",
+                    "value": 800
+                  },
+                  "nativeType": "int4",
+                  "nullable": false
+                },
                 "updatedAt": {
                   "codecId": "pg/timestamptz-string@1",
                   "nativeType": "timestamptz",
@@ -1274,7 +1510,7 @@
         "kind": "postgres-schema"
       }
     },
-    "storageHash": "707509f1f0f6c453885600b1596dcafbf7e0e5f3cf714bb1397b57b8f933d17f"
+    "storageHash": "604b4e24a7b4d3087b18a9c4cf544096672f2db78f390047b6e6a3f19fc8e986"
   },
   "execution": {
     "executionHash": "31af339d7d05d87edd5a9c627e3755c21d2603062f964020da6824bd0e88c856",

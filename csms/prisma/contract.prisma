@@ -1,9 +1,10 @@
 // use prisma-next
 
 model Site {
-  id           Int    @id @default(autoincrement())
-  name         String
-  powerLimitKw Float
+  id                  Int    @id @default(autoincrement())
+  name                String
+  powerLimitKw        Float
+  tariffPaisePerKwh   Int    @default(800)
 
   chargers Charger[]
 
@@ -82,6 +83,7 @@ model ChargingSession {
   connector   Connector @relation(fields: [connectorId], references: [id])
 
   meterReadings MeterReading[]
+  invoice        Invoice?
 
   createdAt TimestamptzString @default(now())
   updatedAt temporal.updatedAtString()
@@ -95,4 +97,17 @@ model MeterReading {
 
   sessionId Int
   session   ChargingSession @relation(fields: [sessionId], references: [transactionId])
+}
+
+model Invoice {
+  id                  Int    @id @default(autoincrement())
+  sessionId           Int    @unique
+  energyWh            Int
+  tariffPaisePerKwh   Int
+  amountPaise         Int
+  currency            String @default("INR")
+  status              String @default("Issued")
+  issuedAt            TimestamptzString @default(now())
+
+  session ChargingSession @relation(fields: [sessionId], references: [transactionId])
 }

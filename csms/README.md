@@ -8,4 +8,12 @@ To run:
 bun run dev
 ```
 
-open http://localhost:3000
+The CSMS runs on http://localhost:6773.
+
+To simulate one complete charger session:
+```sh
+bun run simulate:charger
+```
+
+The simulator sends BootNotification, status updates, StartTransaction,
+MeterValues, and StopTransaction, then fetches the generated invoice.

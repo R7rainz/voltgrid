@@ -5,6 +5,7 @@
     "dev": "PORT=6773 bun run --hot src/index.ts",
     "start": "PORT=6773 bun run src/index.ts",
     "build": "bun build src/index.ts --target bun --outdir dist",
+    "simulate:charger": "bun run scripts/simulate-charger.ts",
     "postinstall": "prisma skills sync || exit 0",
     "contract:emit": "prisma contract emit"
   },

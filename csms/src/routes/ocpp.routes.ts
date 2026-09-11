@@ -992,6 +992,7 @@ ocppRoutes.get(
                         const result = await db.transaction(async (tx) => {
                             const charger = await tx.orm.public.Charger.select(
                                 "id",
+                                "siteId",
                             )
                                 .where({
                                     chargePointId: String(chargerId),
@@ -999,6 +1000,19 @@ ocppRoutes.get(
                                 .first();
 
                             if (!charger) {
+                                return {
+                                    status: "Invalid" as const,
+                                };
+                            }
+
+                            const site =
+                                await tx.orm.public.Site.select(
+                                    "tariffPaisePerKwh",
+                                )
+                                    .where({ id: charger.siteId })
+                                    .first();
+
+                            if (!site || site.tariffPaisePerKwh < 0) {
                                 return {
                                     status: "Invalid" as const,
                                 };
@@ -1085,6 +1099,32 @@ ocppRoutes.get(
                                 meterStopWh: meterStop,
                                 lastMeterWh: meterStop,
                                 stoppedAt: stopAt,
+                            });
+
+                            const energyWh = meterStop - session.meterStartWh;
+                            const amountPaise = Math.round(
+                                (energyWh * site.tariffPaisePerKwh) / 1000,
+                            );
+
+                            await tx.orm.public.Invoice.upsert({
+                                conflictOn: {
+                                    sessionId: session.transactionId,
+                                },
+                                create: {
+                                    sessionId: session.transactionId,
+                                    energyWh,
+                                    tariffPaisePerKwh: site.tariffPaisePerKwh,
+                                    amountPaise,
+                                    currency: "INR",
+                                    status: "Issued",
+                                },
+                                update: {
+                                    energyWh,
+                                    tariffPaisePerKwh: site.tariffPaisePerKwh,
+                                    amountPaise,
+                                    currency: "INR",
+                                    status: "Issued",
+                                },
                             });
 
                             await tx.orm.public.Connector.where({
