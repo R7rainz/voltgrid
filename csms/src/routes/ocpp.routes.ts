@@ -6,6 +6,7 @@ import {
     markChargerSeen,
     updateConnectorStatus,
 } from "../modules/chargers/charger-state";
+import { rebalanceSite } from "../modules/load-balancer/load-balancer-client";
 import { db } from "../infrastructure/database/db";
 import type { JsonValue } from "@prisma/orm-postgres/target/codec-types";
 
@@ -540,6 +541,7 @@ ocppRoutes.get(
                         const result = await db.transaction(async (tx) => {
                             const charger = await tx.orm.public.Charger.select(
                                 "id",
+                                "siteId",
                             )
                                 .where({
                                     chargePointId: String(chargerId),
@@ -631,6 +633,7 @@ ocppRoutes.get(
                             return {
                                 status: "Accepted" as const,
                                 transactionId: session.transactionId,
+                                siteId: charger.siteId,
                             };
                         });
 
@@ -659,6 +662,10 @@ ocppRoutes.get(
                         console.log(
                             `StartTransaction ${result.status.toLowerCase()} for ${chargerId}`,
                         );
+
+                        if (result.status === "Accepted") {
+                            void rebalanceSite(result.siteId);
+                        }
                     } catch (error) {
                         console.error(
                             `Failed to start transaction for charger ${chargerId}:`,
@@ -1005,12 +1012,11 @@ ocppRoutes.get(
                                 };
                             }
 
-                            const site =
-                                await tx.orm.public.Site.select(
-                                    "tariffPaisePerKwh",
-                                )
-                                    .where({ id: charger.siteId })
-                                    .first();
+                            const site = await tx.orm.public.Site.select(
+                                "tariffPaisePerKwh",
+                            )
+                                .where({ id: charger.siteId })
+                                .first();
 
                             if (!site || site.tariffPaisePerKwh < 0) {
                                 return {
@@ -1064,6 +1070,7 @@ ocppRoutes.get(
                                 return {
                                     status: "Accepted" as const,
                                     connectorNumber: connector.connectorNumber,
+                                    siteId: charger.siteId,
                                 };
                             }
 
@@ -1143,6 +1150,7 @@ ocppRoutes.get(
                             return {
                                 status: "Accepted" as const,
                                 connectorNumber: connector.connectorNumber,
+                                siteId: charger.siteId,
                             };
                         });
 
@@ -1173,6 +1181,10 @@ ocppRoutes.get(
                         console.log(
                             `StopTransaction ${result.status.toLowerCase()} for ${chargerId}`,
                         );
+
+                        if (result.status === "Accepted") {
+                            void rebalanceSite(result.siteId);
+                        }
                     } catch (error) {
                         console.error(
                             `Failed to stop transaction for charger ${chargerId}:`,
