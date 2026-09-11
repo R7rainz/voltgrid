@@ -363,7 +363,7 @@ ocppRoutes.get(
 
               if (!charger) {
                 return {
-                  status: "invalid" as const,
+                  status: "Invalid" as const,
                   transactionId: 0,
                 };
               }
@@ -396,18 +396,19 @@ ocppRoutes.get(
 
               if (!connector) {
                 return {
-                  status: "invalid" as const,
+                  status: "Invalid" as const,
                   transactionId: 0,
                 };
               }
 
-              const activeSession =
-                await tx.orm.public.ChargingSession.select("transactionId")
-                  .where({
-                    connectorId: connector.id,
-                    status: "Active",
-                  })
-                  .first();
+              const activeSession = await tx.orm.public.ChargingSession.select(
+                "transactionId",
+              )
+                .where({
+                  connectorId: connector.id,
+                  status: "Active",
+                })
+                .first();
 
               if (activeSession) {
                 return {
@@ -415,8 +416,82 @@ ocppRoutes.get(
                   transactionId: activeSession.transactionId,
                 };
               }
+
+              const session = await tx.orm.public.ChargingSession.create({
+                idTag,
+                status: "Active",
+                meterStartWh: meterStart,
+                lastMeterWh: meterStart,
+                startedAt: startAt,
+                chargerId: charger.id,
+                connectorId: connector.id,
+              });
+
+              await tx.orm.public.Connector
+                .where({ id: connector.id })
+                .update({
+                  status: "Charging",
+                });
+
+              await tx.orm.public.Charger
+                .where({ id: charger.id })
+                .update({
+                  connected: true,
+                  lastSeenAt: now,
+                });
+
+              return {
+                status: "Accepted" as const,
+                transactionId: session.transactionId,
+              };
             });
-          } catch (error) {}
+
+            if (result.status === "Accepted") {
+              updateConnectorStatus(
+                String(chargerId),
+                connectorId,
+                "Charging",
+                "NoError",
+              );
+            }
+
+            ws.send(
+              JSON.stringify([
+                3,
+                uniqueId,
+                {
+                  transactionId: result.transactionId,
+                  idTagInfo: {
+                    status: result.status,
+                  },
+                },
+              ]),
+            );
+
+            console.log(
+              `StartTransaction ${result.status.toLowerCase()} for ${chargerId}`,
+            );
+          } catch (error) {
+            console.error(
+              `Failed to start transaction for charger ${chargerId}:`,
+              error,
+            );
+
+            ws.send(
+              JSON.stringify([
+                3,
+                uniqueId,
+                {
+                  transactionId: 0,
+                  idTagInfo: {
+                    status: "Invalid",
+                  },
+                },
+              ]),
+            );
+          }
+
+          return;
         }
 
         ws.send(
