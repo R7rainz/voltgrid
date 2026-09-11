@@ -11,6 +11,108 @@ import type { JsonValue } from "@prisma/orm-postgres/target/codec-types";
 
 export const ocppRoutes = new Hono();
 
+type Socket = {
+    send(message: string): void;
+};
+
+type JsonObject = Record<string, unknown>;
+
+const OCPP_STATUSES = new Set([
+    "Available",
+    "Preparing",
+    "Charging",
+    "SuspendedEV",
+    "SuspendedEVSE",
+    "Finishing",
+    "Reserved",
+    "Unavailable",
+    "Faulted",
+]);
+
+const OCPP_ERROR_CODES = new Set([
+    "ConnectorLockFailure",
+    "EVCommunicationError",
+    "GroundFailure",
+    "HighTemperature",
+    "InternalError",
+    "LocalListConflict",
+    "NoError",
+    "OtherError",
+    "OverCurrentFailure",
+    "OverVoltage",
+    "PowerMeterFailure",
+    "PowerSwitchFailure",
+    "ReaderFailure",
+    "ResetFailure",
+    "UnderVoltage",
+    "WeakSignal",
+]);
+
+const STOP_REASONS = new Set([
+    "EmergencyStop",
+    "EVDisconnected",
+    "HardReset",
+    "Local",
+    "Other",
+    "PowerLoss",
+    "Reboot",
+    "Remote",
+    "SoftReset",
+    "UnlockCommand",
+]);
+
+function isJsonObject(value: unknown): value is JsonObject {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+    return typeof value === "string" && value.trim().length > 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+    return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+    return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function parseTimestamp(value: unknown): string | undefined {
+    if (
+        typeof value !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
+            value,
+        )
+    ) {
+        return undefined;
+    }
+
+    const parsed = Date.parse(value);
+
+    return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString();
+}
+
+function isOcppStatus(value: unknown): value is string {
+    return typeof value === "string" && OCPP_STATUSES.has(value);
+}
+
+function isOcppErrorCode(value: unknown): value is string {
+    return typeof value === "string" && OCPP_ERROR_CODES.has(value);
+}
+
+function isStopReason(value: unknown): value is string {
+    return typeof value === "string" && STOP_REASONS.has(value);
+}
+
+function sendCallError(
+    ws: Socket,
+    uniqueId: string,
+    errorCode: string,
+    description: string,
+) {
+    ws.send(JSON.stringify([4, uniqueId, errorCode, description, {}]));
+}
+
 ocppRoutes.get(
     "/ocpp/:chargerId",
     upgradeWebSocket((c) => {
@@ -20,7 +122,6 @@ ocppRoutes.get(
             onOpen(_event, ws) {
                 markChargerConnected(String(chargerId));
                 console.log(`Charger connected: ${chargerId}`);
-                ws.send(`Connected to VoltGrid: ${chargerId}`);
             },
 
             async onMessage(event, ws) {
@@ -37,19 +138,46 @@ ocppRoutes.get(
                     return;
                 }
 
-                if (!Array.isArray(message) || message.length < 4) {
+                if (!Array.isArray(message)) {
                     console.log("Invalid OCPP message");
                     return;
                 }
 
                 const [messageType, uniqueId, action, payload] = message;
 
+                if (message.length !== 4) {
+                    console.log("Invalid OCPP Call length");
+
+                    if (typeof uniqueId === "string" && uniqueId.length > 0) {
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "ProtocolError",
+                            "OCPP Call messages must contain exactly four items",
+                        );
+                    }
+
+                    return;
+                }
+
                 if (
                     messageType !== 2 ||
                     typeof uniqueId !== "string" ||
-                    typeof action !== "string"
+                    uniqueId.length === 0 ||
+                    typeof action !== "string" ||
+                    action.length === 0
                 ) {
                     console.log("Invalid OCPP Call message");
+
+                    if (typeof uniqueId === "string" && uniqueId.length > 0) {
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "ProtocolError",
+                            "Invalid OCPP Call header",
+                        );
+                    }
+
                     return;
                 }
 
@@ -58,6 +186,17 @@ ocppRoutes.get(
                 markChargerSeen(String(chargerId));
 
                 if (action === "Heartbeat") {
+                    if (!isJsonObject(payload)) {
+                        console.log("Invalid Heartbeat payload");
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "FormationViolation",
+                            "Heartbeat payload must be an object",
+                        );
+                        return;
+                    }
+
                     ws.send(
                         JSON.stringify([
                             3,
@@ -73,19 +212,21 @@ ocppRoutes.get(
                 }
 
                 if (action === "StatusNotification") {
-                    if (
-                        typeof payload !== "object" ||
-                        payload === null ||
-                        Array.isArray(payload)
-                    ) {
+                    if (!isJsonObject(payload)) {
                         console.log("Invalid StatusNotification payload");
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "FormationViolation",
+                            "StatusNotification payload must be an object",
+                        );
                         return;
                     }
 
                     const statusPayload = payload as {
-                        connectorId?: number;
-                        status?: string;
-                        errorCode?: string;
+                        connectorId?: unknown;
+                        status?: unknown;
+                        errorCode?: unknown;
                     };
 
                     const connectorId = statusPayload.connectorId;
@@ -93,11 +234,17 @@ ocppRoutes.get(
                     const errorCode = statusPayload.errorCode;
 
                     if (
-                        typeof connectorId !== "number" ||
-                        typeof status !== "string" ||
-                        typeof errorCode !== "string"
+                        !isNonNegativeInteger(connectorId) ||
+                        !isOcppStatus(status) ||
+                        !isOcppErrorCode(errorCode)
                     ) {
                         console.log("Invalid StatusNotification payload");
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "PropertyConstraintViolation",
+                            "StatusNotification contains an invalid connector, status, or errorCode",
+                        );
                         return;
                     }
 
@@ -165,7 +312,12 @@ ocppRoutes.get(
                             console.error(
                                 `Cannot persist status for unknown charger ${chargerId}`,
                             );
-                            ws.send(JSON.stringify([3, uniqueId, {}]));
+                            sendCallError(
+                                ws,
+                                uniqueId,
+                                "GenericError",
+                                "Charger is not registered",
+                            );
                             return;
                         }
 
@@ -187,19 +339,26 @@ ocppRoutes.get(
                             `Failed to persist status for charger ${chargerId}:`,
                             error,
                         );
-                        ws.send(JSON.stringify([3, uniqueId, {}]));
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "GenericError",
+                            "Could not persist StatusNotification",
+                        );
                     }
 
                     return;
                 }
 
                 if (action === "BootNotification") {
-                    if (
-                        typeof payload !== "object" ||
-                        payload === null ||
-                        Array.isArray(payload)
-                    ) {
+                    if (!isJsonObject(payload)) {
                         console.log("Invalid BootNotification payload");
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "FormationViolation",
+                            "BootNotification payload must be an object",
+                        );
                         return;
                     }
 
@@ -209,15 +368,21 @@ ocppRoutes.get(
                     };
 
                     if (
-                        typeof bootPayload.chargePointVendor !== "string" ||
-                        typeof bootPayload.chargePointModel !== "string"
+                        !isNonEmptyString(bootPayload.chargePointVendor) ||
+                        !isNonEmptyString(bootPayload.chargePointModel)
                     ) {
                         console.log("Invalid BootNotification payload");
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "PropertyConstraintViolation",
+                            "BootNotification requires non-empty vendor and model",
+                        );
                         return;
                     }
 
-                    const vendor = bootPayload.chargePointVendor;
-                    const model = bootPayload.chargePointModel;
+                    const vendor = bootPayload.chargePointVendor.trim();
+                    const model = bootPayload.chargePointModel.trim();
 
                     try {
                         const now = new Date().toISOString();
@@ -329,12 +494,14 @@ ocppRoutes.get(
                 }
 
                 if (action === "StartTransaction") {
-                    if (
-                        typeof payload !== "object" ||
-                        payload === null ||
-                        Array.isArray(payload)
-                    ) {
+                    if (!isJsonObject(payload)) {
                         console.log("Invalid StartTransaction payload");
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "FormationViolation",
+                            "StartTransaction payload must be an object",
+                        );
                         return;
                     }
 
@@ -349,26 +516,26 @@ ocppRoutes.get(
                     const idTag = startPayload.idTag;
                     const meterStart = startPayload.meterStart;
                     const timestamp = startPayload.timestamp;
+                    const startAt = parseTimestamp(timestamp);
 
                     if (
-                        typeof connectorId !== "number" ||
-                        !Number.isInteger(connectorId) ||
-                        connectorId < 1 ||
-                        typeof idTag !== "string" ||
-                        idTag.trim().length === 0 ||
-                        typeof meterStart !== "number" ||
-                        !Number.isInteger(meterStart) ||
-                        meterStart < 0 ||
-                        typeof timestamp !== "string" ||
-                        Number.isNaN(Date.parse(timestamp))
+                        !isPositiveInteger(connectorId) ||
+                        !isNonEmptyString(idTag) ||
+                        !isNonNegativeInteger(meterStart) ||
+                        startAt === undefined
                     ) {
                         console.log("Invalid StartTransaction payload");
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "PropertyConstraintViolation",
+                            "StartTransaction contains an invalid connector, idTag, meterStart, or timestamp",
+                        );
                         return;
                     }
 
                     try {
                         const now = new Date().toISOString();
-                        const startAt = new Date(timestamp).toISOString();
 
                         const result = await db.transaction(async (tx) => {
                             const charger = await tx.orm.public.Charger.select(
@@ -439,7 +606,7 @@ ocppRoutes.get(
 
                             const session =
                                 await tx.orm.public.ChargingSession.create({
-                                    idTag,
+                                    idTag: idTag.trim(),
                                     status: "Active",
                                     meterStartWh: meterStart,
                                     lastMeterWh: meterStart,
@@ -498,17 +665,11 @@ ocppRoutes.get(
                             error,
                         );
 
-                        ws.send(
-                            JSON.stringify([
-                                3,
-                                uniqueId,
-                                {
-                                    transactionId: 0,
-                                    idTagInfo: {
-                                        status: "Invalid",
-                                    },
-                                },
-                            ]),
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "GenericError",
+                            "Could not persist StartTransaction",
                         );
                     }
 
@@ -516,12 +677,14 @@ ocppRoutes.get(
                 }
 
                 if (action === "MeterValues") {
-                    if (
-                        typeof payload !== "object" ||
-                        payload === null ||
-                        Array.isArray(payload)
-                    ) {
+                    if (!isJsonObject(payload)) {
                         console.log("Invalid MeterValues payload");
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "FormationViolation",
+                            "MeterValues payload must be an object",
+                        );
                         return;
                     }
 
@@ -536,16 +699,18 @@ ocppRoutes.get(
                     const meterValues = meterPayload.meterValue;
 
                     if (
-                        typeof connectorId !== "number" ||
-                        !Number.isInteger(connectorId) ||
-                        connectorId < 1 ||
-                        typeof transactionId !== "number" ||
-                        !Number.isInteger(transactionId) ||
-                        transactionId < 1 ||
+                        !isPositiveInteger(connectorId) ||
+                        !isPositiveInteger(transactionId) ||
                         !Array.isArray(meterValues) ||
                         meterValues.length === 0
                     ) {
                         console.log("Invalid MeterValues payload");
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "PropertyConstraintViolation",
+                            "MeterValues requires a positive connectorId, transactionId, and meterValue array",
+                        );
                         return;
                     }
 
@@ -566,7 +731,14 @@ ocppRoutes.get(
                             sampledValue?: unknown;
                         };
 
-                        if (!Array.isArray(meterValuePayload.sampledValue)) {
+                        const timestamp = parseTimestamp(
+                            meterValuePayload.timestamp,
+                        );
+
+                        if (
+                            timestamp === undefined ||
+                            !Array.isArray(meterValuePayload.sampledValue)
+                        ) {
                             continue;
                         }
 
@@ -587,6 +759,7 @@ ocppRoutes.get(
 
                             if (
                                 typeof sampledValuePayload.value !== "string" ||
+                                sampledValuePayload.value.trim().length === 0 ||
                                 (sampledValuePayload.unit !== undefined &&
                                     sampledValuePayload.unit !== "Wh") ||
                                 (sampledValuePayload.measurand !== undefined &&
@@ -608,18 +781,7 @@ ocppRoutes.get(
                             }
 
                             meterWh = parsedMeterWh;
-
-                            if (
-                                typeof meterValuePayload.timestamp ===
-                                    "string" &&
-                                !Number.isNaN(
-                                    Date.parse(meterValuePayload.timestamp),
-                                )
-                            ) {
-                                recordedAt = new Date(
-                                    meterValuePayload.timestamp,
-                                ).toISOString();
-                            }
+                            recordedAt = timestamp;
 
                             break;
                         }
@@ -632,6 +794,12 @@ ocppRoutes.get(
                     if (meterWh === undefined) {
                         console.log(
                             "No valid energy reading found in MeterValues",
+                        );
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "PropertyConstraintViolation",
+                            "MeterValues must contain a valid Wh energy reading and timestamp",
                         );
                         return;
                     }
@@ -740,32 +908,253 @@ ocppRoutes.get(
                             console.log(
                                 `Could not persist MeterValues for transaction ${transactionId}`,
                             );
+                            sendCallError(
+                                ws,
+                                uniqueId,
+                                "GenericError",
+                                "Could not persist MeterValues",
+                            );
                         } else {
                             console.log(
                                 `MeterValues persisted: ${readingWh} Wh for transaction ${transactionId}`,
                             );
-                        }
 
-                        ws.send(JSON.stringify([3, uniqueId, {}]));
+                            ws.send(JSON.stringify([3, uniqueId, {}]));
+                        }
                     } catch (error) {
                         console.error(
                             `Failed to persist MeterValues for charger ${chargerId}:`,
                             error,
                         );
 
-                        ws.send(JSON.stringify([3, uniqueId, {}]));
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "GenericError",
+                            "Could not persist MeterValues",
+                        );
                     }
 
                     return;
                 }
-                ws.send(
-                    JSON.stringify([
-                        4,
-                        uniqueId,
-                        "NotImplemented",
-                        `Action ${action} is not implemented`,
-                        {},
-                    ]),
+
+                if (action === "StopTransaction") {
+                    if (!isJsonObject(payload)) {
+                        console.log("Invalid StopTransaction payload");
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "FormationViolation",
+                            "StopTransaction payload must be an object",
+                        );
+                        return;
+                    }
+
+                    const stopPayload = payload as {
+                        transactionId?: unknown;
+                        meterStop?: unknown;
+                        timestamp?: unknown;
+                        reason?: unknown;
+                        idTag?: unknown;
+                        transactionData?: unknown;
+                    };
+
+                    const transactionId = stopPayload.transactionId;
+                    const meterStop = stopPayload.meterStop;
+                    const stopAt = parseTimestamp(stopPayload.timestamp);
+                    const reason = stopPayload.reason;
+                    const idTag = stopPayload.idTag;
+                    const transactionData = stopPayload.transactionData;
+
+                    if (
+                        !isPositiveInteger(transactionId) ||
+                        !isNonNegativeInteger(meterStop) ||
+                        stopAt === undefined ||
+                        (reason !== undefined && !isStopReason(reason)) ||
+                        (idTag !== undefined && !isNonEmptyString(idTag)) ||
+                        (transactionData !== undefined &&
+                            (!Array.isArray(transactionData) ||
+                                !transactionData.every(isJsonObject)))
+                    ) {
+                        console.log("Invalid StopTransaction payload");
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "PropertyConstraintViolation",
+                            "StopTransaction contains invalid transaction, meter, timestamp, or optional fields",
+                        );
+                        return;
+                    }
+
+                    try {
+                        const now = new Date().toISOString();
+
+                        const result = await db.transaction(async (tx) => {
+                            const charger = await tx.orm.public.Charger.select(
+                                "id",
+                            )
+                                .where({
+                                    chargePointId: String(chargerId),
+                                })
+                                .first();
+
+                            if (!charger) {
+                                return {
+                                    status: "Invalid" as const,
+                                };
+                            }
+
+                            const session =
+                                await tx.orm.public.ChargingSession.select(
+                                    "transactionId",
+                                    "connectorId",
+                                    "status",
+                                    "meterStartWh",
+                                    "lastMeterWh",
+                                )
+                                    .where({
+                                        transactionId,
+                                        chargerId: charger.id,
+                                    })
+                                    .first();
+
+                            if (!session) {
+                                return {
+                                    status: "Invalid" as const,
+                                };
+                            }
+
+                            const previousMeterWh =
+                                session.lastMeterWh ?? session.meterStartWh;
+
+                            if (meterStop < previousMeterWh) {
+                                return {
+                                    status: "Invalid" as const,
+                                };
+                            }
+
+                            const connector =
+                                await tx.orm.public.Connector.select(
+                                    "connectorNumber",
+                                )
+                                    .where({ id: session.connectorId })
+                                    .first();
+
+                            if (!connector) {
+                                return {
+                                    status: "Invalid" as const,
+                                };
+                            }
+
+                            if (session.status !== "Active") {
+                                return {
+                                    status: "Accepted" as const,
+                                    connectorNumber: connector.connectorNumber,
+                                };
+                            }
+
+                            await tx.orm.public.OcppMessage.upsert({
+                                conflictOn: {
+                                    chargerId: charger.id,
+                                    messageId: uniqueId,
+                                },
+                                create: {
+                                    messageId: uniqueId,
+                                    action,
+                                    direction: "inbound",
+                                    payload: payload as JsonValue,
+                                    chargerId: charger.id,
+                                },
+                                update: {
+                                    action,
+                                    direction: "inbound",
+                                    payload: payload as JsonValue,
+                                },
+                            });
+
+                            await tx.orm.public.MeterReading.create({
+                                meterWh: meterStop,
+                                recordedAt: stopAt,
+                                sessionId: session.transactionId,
+                            });
+
+                            await tx.orm.public.ChargingSession.where({
+                                transactionId: session.transactionId,
+                            }).update({
+                                status: "Completed",
+                                meterStopWh: meterStop,
+                                lastMeterWh: meterStop,
+                                stoppedAt: stopAt,
+                            });
+
+                            await tx.orm.public.Connector.where({
+                                id: session.connectorId,
+                            }).update({
+                                status: "Available",
+                            });
+
+                            await tx.orm.public.Charger.where({
+                                id: charger.id,
+                            }).update({
+                                connected: true,
+                                lastSeenAt: now,
+                            });
+
+                            return {
+                                status: "Accepted" as const,
+                                connectorNumber: connector.connectorNumber,
+                            };
+                        });
+
+                        if (
+                            result.status === "Accepted" &&
+                            result.connectorNumber !== undefined
+                        ) {
+                            updateConnectorStatus(
+                                String(chargerId),
+                                result.connectorNumber,
+                                "Available",
+                                "NoError",
+                            );
+                        }
+
+                        ws.send(
+                            JSON.stringify([
+                                3,
+                                uniqueId,
+                                {
+                                    idTagInfo: {
+                                        status: result.status,
+                                    },
+                                },
+                            ]),
+                        );
+
+                        console.log(
+                            `StopTransaction ${result.status.toLowerCase()} for ${chargerId}`,
+                        );
+                    } catch (error) {
+                        console.error(
+                            `Failed to stop transaction for charger ${chargerId}:`,
+                            error,
+                        );
+
+                        sendCallError(
+                            ws,
+                            uniqueId,
+                            "GenericError",
+                            "Could not persist StopTransaction",
+                        );
+                    }
+
+                    return;
+                }
+
+                sendCallError(
+                    ws,
+                    uniqueId,
+                    "NotSupported",
+                    `Action ${action} is not implemented`,
                 );
             },
 
