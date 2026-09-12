@@ -43,6 +43,10 @@ their full demand first, and the remaining capacity is shared equally among
 the rest. Input validation rejects negative, non-finite, duplicate, or empty
 charger data.
 
+The Hono CSMS calls this endpoint when active sessions change, then sends each
+returned limit to a connected browser simulator over its WebSocket. The Go
+service itself remains stateless and does not control physical hardware.
+
 ## Checks
 
 ```sh

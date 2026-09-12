@@ -29,6 +29,7 @@ ws://localhost:6773/ocpp/<charger-id>
 ```
 
 The CSMS calls `POST http://localhost:8787/v1/allocate` after accepted session
-start and stop events. If the Go service is unavailable, the charging session
-still remains the source-of-truth operation and the allocation failure is
-logged.
+start and stop events. It applies each returned allocation to a connected
+simulator with an outbound charging-profile command. If the Go service or a
+charger is unavailable, the charging session remains the source-of-truth
+operation and the allocation failure is logged.
