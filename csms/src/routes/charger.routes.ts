@@ -73,7 +73,6 @@ chargerRoutes.patch("/site", async (c) => {
             .first();
 
         void rebalanceSite(currentSite.id);
-
         return c.json({ site });
     } catch (error) {
         console.error("Failed to update site configuration:", error);

@@ -91,7 +91,6 @@ function getProfileLimitKw(payload: unknown) {
 
     return Math.max(0, firstPeriod.limit / 1000);
 }
-
 export default function Home() {
     const [chargers, setChargers] = useState<SimulatedCharger[]>([]);
     const [backendOnline, setBackendOnline] = useState(false);
@@ -659,7 +658,7 @@ export default function Home() {
     const allocatedPowerKw =
         reportedAllocations.length === chargingCount && chargingCount > 0
             ? reportedAllocations.reduce((total, power) => total + power, 0)
-            : Math.min(siteCapacityKw, projectedDemandKw);
+        : Math.min(siteCapacityKw, projectedDemandKw);
     const headroomKw = Math.max(0, siteCapacityKw - allocatedPowerKw);
     const capacityPercent = siteCapacityKw
         ? Math.min(100, (allocatedPowerKw / siteCapacityKw) * 100)
