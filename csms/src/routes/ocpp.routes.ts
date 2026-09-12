@@ -6,6 +6,11 @@ import {
     markChargerSeen,
     updateConnectorStatus,
 } from "../modules/chargers/charger-state";
+import {
+    registerChargerSocket,
+    resolveChargerCall,
+    unregisterChargerSocket,
+} from "../modules/chargers/charger-connections";
 import { rebalanceSite } from "../modules/load-balancer/load-balancer-client";
 import { db } from "../infrastructure/database/db";
 import type { JsonValue } from "@prisma/orm-postgres/target/codec-types";
@@ -114,6 +119,25 @@ function sendCallError(
     ws.send(JSON.stringify([4, uniqueId, errorCode, description, {}]));
 }
 
+async function markChargerOffline(chargerId: string) {
+    try {
+        const charger = await db.orm.public.Charger.select("id", "siteId")
+            .where({ chargePointId: chargerId })
+            .first();
+
+        if (!charger) {
+            return;
+        }
+
+        await db.orm.public.Charger.where({ id: charger.id }).update({
+            connected: false,
+        });
+        void rebalanceSite(charger.siteId);
+    } catch (error) {
+        console.error(`Failed to mark charger ${chargerId} offline:`, error);
+    }
+}
+
 ocppRoutes.get(
     "/ocpp/:chargerId",
     upgradeWebSocket((c) => {
@@ -121,6 +145,7 @@ ocppRoutes.get(
 
         return {
             onOpen(_event, ws) {
+                registerChargerSocket(String(chargerId), ws);
                 markChargerConnected(String(chargerId));
                 console.log(`Charger connected: ${chargerId}`);
             },
@@ -145,6 +170,11 @@ ocppRoutes.get(
                 }
 
                 const [messageType, uniqueId, action, payload] = message;
+
+                if (messageType === 3 || messageType === 4) {
+                    resolveChargerCall(String(chargerId), message);
+                    return;
+                }
 
                 if (message.length !== 4) {
                     console.log("Invalid OCPP Call length");
@@ -1211,7 +1241,9 @@ ocppRoutes.get(
             },
 
             onClose() {
+                unregisterChargerSocket(String(chargerId));
                 markChargerDisconnected(String(chargerId));
+                void markChargerOffline(String(chargerId));
                 console.log(`Charger disconnected: ${chargerId}`);
             },
 

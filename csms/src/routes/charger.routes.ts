@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { getAllChargers } from "../modules/chargers/charger-state";
+import { rebalanceSite } from "../modules/load-balancer/load-balancer-client";
 import { db } from "../infrastructure/database/db";
 
 export const chargerRoutes = new Hono();
@@ -70,6 +71,8 @@ chargerRoutes.patch("/site", async (c) => {
         )
             .where({ id: currentSite.id })
             .first();
+
+        void rebalanceSite(currentSite.id);
 
         return c.json({ site });
     } catch (error) {
