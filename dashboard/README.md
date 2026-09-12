@@ -22,6 +22,9 @@ Open http://localhost:9000, add a simulated charger, and choose **Run full
 demo**. The browser sends OCPP-style WebSocket messages to the Hono backend,
 which persists the session, meter readings, and invoice in PostgreSQL.
 
+The simulator cards are local to the open browser tab. A refresh clears the
+cards, but it does not remove the persisted backend records.
+
 Optional URLs:
 
 ```env
