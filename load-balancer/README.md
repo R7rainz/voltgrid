@@ -4,7 +4,17 @@ This service calculates fair site-power allocations for active EV chargers.
 It is a decision service called by the Hono CSMS; it does not connect to
 PostgreSQL or speak OCPP directly.
 
-## Run
+## Run with Docker Compose
+
+From the repository root, start the complete VoltGrid stack with one command:
+
+```sh
+docker compose up --build -d
+```
+
+The load balancer is then available at `http://localhost:8787`.
+
+## Optional local development
 
 ```sh
 go run .

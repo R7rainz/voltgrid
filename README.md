@@ -187,23 +187,11 @@ docker compose down
 To remove the local database volume as well, use `docker compose down -v`.
 That removes demo data and is not recoverable from the local volume.
 
-## Run services without Docker
+## Optional: run individual services without Docker
 
-```sh
-# CSMS
-cd csms
-bun install
-bun run dev
-
-# In another terminal: Go allocator
-cd load-balancer
-go run .
-
-# In another terminal: dashboard
-cd dashboard
-bun install
-bun run dev
-```
+Use this only when developing one service in isolation. It requires separate
+terminals and a separately available PostgreSQL database; Docker Compose is the
+recommended path for the complete demo.
 
 The CSMS reads `DATABASE_URL` from `csms/.env`. Copy `csms/.env.example` and
 set it to Neon or another PostgreSQL database. The Go integration settings are:
@@ -215,7 +203,7 @@ CHARGER_MAX_POWER_KW="50"
 
 ## Demo procedure
 
-1. Start the services.
+1. From the repository root, run `docker compose up --build -d`.
 2. Add two or three simulated vehicles with unique charger IDs.
 3. Use **Connect** to show boot and availability.
 4. Use **Start** or **Run full demo** to create sessions.
