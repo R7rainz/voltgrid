@@ -273,3 +273,11 @@ docs/             Architecture and supervisor demo notes
 
 The project is built continuously rather than being developed as two separate
 applications; the branches only preserve what should be shown at each review.
+
+## Documentation
+
+- [High-level design](docs/high-level-design.md)
+- [Architecture](docs/architecture.md)
+- [Phase demo plan](docs/demo-phases.md)
+- [CSMS guide](csms/README.md)
+- [Load-balancer contract](load-balancer/README.md)
