@@ -14,8 +14,9 @@ Show the supervisor:
 5. Start a session and show the transaction ID.
 6. Send meter values using `+1 kWh` or **Run full demo**.
 7. Stop the session and show the generated INR invoice.
-8. Refresh the dashboard or query PostgreSQL to show that the session and
-   invoice are durable records.
+8. Query PostgreSQL to show that the session and invoice are durable records.
+   The current browser simulator cards are local to the dashboard tab, so a
+   refresh clears those cards even though the backend records remain stored.
 
 The key claim for Phase 1 is: VoltGrid can manage multiple simulated chargers,
 charging sessions, meter readings, and billing without physical vehicle
@@ -31,12 +32,13 @@ Show the supervisor:
 4. Show Hono calling the Go `/v1/allocate` contract.
 5. Use a simple example such as a `100 kW` site with two chargers requesting
    `80 kW` each; the allocator returns `50 kW` each and `100 kW` total.
-6. Repeat after one charger stops and show that the active set is recalculated.
+6. Show each simulator acknowledging the outbound charging-profile command and
+   displaying its applied allocation.
+7. Repeat after one charger stops and show that the active set is recalculated.
 
-The current Phase 2 implementation demonstrates the allocation decision and
-the capacity guarantee. It does not yet claim physical power control. The next
-implementation step is sending the returned allocation to each connected
-charger through an outbound OCPP charging-profile command.
+The Phase 2 implementation demonstrates the allocation decision, capacity
+guarantee, outbound command round trip, and dashboard update. It does not claim
+physical power control.
 
 ## Questions to prepare for
 

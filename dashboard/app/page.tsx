@@ -38,6 +38,7 @@ type SimulatedCharger = {
     meterWh: number;
     transactionId?: number;
     invoice?: Invoice;
+    allocatedPowerKw?: number;
     error?: string;
 };
 
@@ -67,6 +68,29 @@ function formatPower(powerKw: number) {
     return `${powerKw.toFixed(powerKw % 1 === 0 ? 0 : 1)} kW`;
 }
 
+function getProfileLimitKw(payload: unknown) {
+    if (!isObject(payload) || !isObject(payload.csChargingProfiles)) {
+        return 0;
+    }
+
+    const schedule = payload.csChargingProfiles.chargingSchedule;
+
+    if (!isObject(schedule) || !Array.isArray(schedule.chargingSchedulePeriod)) {
+        return 0;
+    }
+
+    const firstPeriod = schedule.chargingSchedulePeriod[0];
+
+    if (
+        !isObject(firstPeriod) ||
+        typeof firstPeriod.limit !== "number" ||
+        !Number.isFinite(firstPeriod.limit)
+    ) {
+        return 0;
+    }
+
+    return Math.max(0, firstPeriod.limit / 1000);
+}
 export default function Home() {
     const [chargers, setChargers] = useState<SimulatedCharger[]>([]);
     const [backendOnline, setBackendOnline] = useState(false);
@@ -222,7 +246,35 @@ export default function Home() {
             return;
         }
 
-        const [messageType, uniqueId, payload] = message;
+        const [messageType, uniqueId, messagePayload] = message;
+        const action = message[2];
+
+        if (messageType === 2 && typeof uniqueId === "string" && typeof action === "string") {
+            const socket = sockets.current.get(id);
+
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                return;
+            }
+
+            if (action === "SetChargingProfile") {
+                const allocatedPowerKw = getProfileLimitKw(message[3]);
+                updateCharger(id, { allocatedPowerKw });
+                setDemoStatus(`${id} power profile applied · ${formatPower(allocatedPowerKw)}`);
+                socket.send(JSON.stringify([3, uniqueId, { status: "Accepted" }]));
+                return;
+            }
+
+            socket.send(
+                JSON.stringify([
+                    4,
+                    uniqueId,
+                    "NotSupported",
+                    `${action} is not implemented by the browser simulator`,
+                    {},
+                ]),
+            );
+            return;
+        }
 
         if ((messageType !== 3 && messageType !== 4) || typeof uniqueId !== "string") {
             return;
@@ -242,7 +294,7 @@ export default function Home() {
             return;
         }
 
-        request.resolve(payload);
+        request.resolve(messagePayload);
         updateCharger(id, { error: undefined });
     }
 
@@ -599,7 +651,14 @@ export default function Home() {
         (charger) => charger.status === "Charging",
     ).length;
     const projectedDemandKw = chargingCount * CHARGER_MAX_POWER_KW;
-    const allocatedPowerKw = Math.min(siteCapacityKw, projectedDemandKw);
+    const reportedAllocations = chargers
+        .filter((charger) => charger.status === "Charging")
+        .map((charger) => charger.allocatedPowerKw)
+        .filter((power): power is number => power !== undefined);
+    const allocatedPowerKw =
+        reportedAllocations.length === chargingCount && chargingCount > 0
+            ? reportedAllocations.reduce((total, power) => total + power, 0)
+        : Math.min(siteCapacityKw, projectedDemandKw);
     const headroomKw = Math.max(0, siteCapacityKw - allocatedPowerKw);
     const capacityPercent = siteCapacityKw
         ? Math.min(100, (allocatedPowerKw / siteCapacityKw) * 100)
@@ -811,7 +870,7 @@ export default function Home() {
                                     </div>
                                     <div className="backend-line">
                                         <span>Projected draw</span>
-                                        <strong>{charger.status === "Charging" ? formatPower(fairShareKw) : "0 kW"}</strong>
+                                        <strong>{charger.status === "Charging" ? formatPower(charger.allocatedPowerKw ?? fairShareKw) : "0 kW"}</strong>
                                     </div>
                                     {charger.invoice ? (
                                         <div className="invoice-strip">

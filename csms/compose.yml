@@ -10,6 +10,6 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - voltgrid_postgres_data:/var/lib/postgresql/data
+      - voltgrid_postgres_data:/var/lib/postgresql
 volumes:
   voltgrid_postgres_data:

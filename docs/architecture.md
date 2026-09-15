@@ -32,6 +32,9 @@ Next.js dashboard :9000
   `GET /api/sessions/:transactionId/invoice` for the dashboard.
 - Calls the Go allocator after an accepted `StartTransaction` and
   `StopTransaction`.
+- Sends the returned allocation to connected simulators through an outbound
+  charging-profile command and tracks the latest applied value in process
+  memory.
 
 ### PostgreSQL/Neon
 
@@ -57,8 +60,8 @@ remain the current implementation.
 
 ## Current integration boundary
 
-The Hono backend is connected to the Go decision endpoint. It logs the returned
-allocation after transaction changes. The next smart-charging step is applying
-those allocations to chargers through an outbound OCPP charging-profile
-message; the current browser simulator does not claim to emulate that command
-yet.
+The Hono backend is connected to the Go decision endpoint and applies the
+returned allocation to connected browser simulators through an outbound
+charging-profile command. The simulator acknowledges the command and shows the
+applied limit on the dashboard. This is a software demonstration of the
+control loop; it does not control physical electrical hardware.

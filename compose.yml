@@ -1,0 +1,62 @@
+name: voltgrid
+
+services:
+    postgres:
+        image: postgres:18-alpine
+        environment:
+            POSTGRES_DB: voltgrid
+            POSTGRES_USER: voltgrid_dev
+            POSTGRES_PASSWORD: voltgrid
+        ports:
+            - "5433:5432"
+        volumes:
+            - voltgrid_postgres_data:/var/lib/postgresql
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U voltgrid_dev -d voltgrid"]
+            interval: 5s
+            timeout: 5s
+            retries: 12
+        restart: unless-stopped
+
+    load-balancer:
+        build:
+            context: ./load-balancer
+        environment:
+            LOAD_BALANCER_ADDR: :8787
+        ports:
+            - "8787:8787"
+        restart: unless-stopped
+
+    csms:
+        build:
+            context: ./csms
+        depends_on:
+            postgres:
+                condition: service_healthy
+            load-balancer:
+                condition: service_started
+        environment:
+            DATABASE_URL: postgresql://voltgrid_dev:voltgrid@postgres:5432/voltgrid
+            LOAD_BALANCER_URL: http://load-balancer:8787
+            CHARGER_MAX_POWER_KW: "50"
+            DASHBOARD_ORIGIN: http://localhost:9000
+            PORT: "6773"
+        ports:
+            - "6773:6773"
+        restart: unless-stopped
+
+    dashboard:
+        build:
+            context: ./dashboard
+        depends_on:
+            csms:
+                condition: service_started
+        environment:
+            NEXT_PUBLIC_CSMS_HTTP_URL: http://localhost:6773
+            NEXT_PUBLIC_CSMS_WS_URL: ws://localhost:6773
+        ports:
+            - "9000:9000"
+        restart: unless-stopped
+
+volumes:
+    voltgrid_postgres_data:
