@@ -67,6 +67,7 @@ invoice.
 
 ## Documentation
 
+- [High-level design](docs/high-level-design.md)
 - [Architecture](docs/architecture.md)
 - [Phase demo plan](docs/demo-phases.md)
 - [CSMS guide](csms/README.md)
