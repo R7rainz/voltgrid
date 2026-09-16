@@ -277,6 +277,7 @@ applications; the branches only preserve what should be shown at each review.
 ## Documentation
 
 - [High-level design](docs/high-level-design.md)
+- [Mermaid system architecture](docs/system-architecture.mmd)
 - [Architecture](docs/architecture.md)
 - [Phase demo plan](docs/demo-phases.md)
 - [CSMS guide](csms/README.md)

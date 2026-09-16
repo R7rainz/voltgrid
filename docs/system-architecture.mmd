@@ -1,0 +1,30 @@
+%% VoltGrid system architecture
+%% Import this file into Mermaid-compatible Excalidraw tooling.
+flowchart TB
+    operator["Operator / Driver<br/>Web browser"]
+    dashboard["Next.js Dashboard<br/>:9000<br/>Operator controls · charger cards · browser simulator"]
+    charger["Physical or simulated charger<br/>OCPP-style client"]
+    csms["Hono + Bun CSMS<br/>:6773<br/>HTTP API · OCPP validation · sessions · billing"]
+    database[("PostgreSQL + Prisma ORM Next<br/>Durable source of truth")]
+    allocator["Go Load Balancer<br/>:8787<br/>Stateless allocation decision service"]
+    redis[("Redis<br/>Planned transient state / pub-sub")]
+
+    operator -->|"HTTP UI actions"| dashboard
+    dashboard -->|"HTTP API"| csms
+    dashboard -->|"Browser simulator WebSocket"| csms
+    charger -->|"OCPP-style WebSocket<br/>/ocpp/:chargerId"| csms
+
+    csms -->|"Prisma reads / writes"| database
+    csms -->|"JSON HTTP<br/>POST /v1/allocate"| allocator
+    allocator -->|"Per-charger allocation<br/>total <= site limit"| csms
+    csms -.->|"Phase 2: charging-profile command<br/>simulator acknowledgement"| charger
+    csms -.->|"Future shared live state / pub-sub"| redis
+
+    classDef actor fill:#eef6ff,stroke:#3976b8,color:#0f2942
+    classDef phase1 fill:#e8fff0,stroke:#19a957,color:#0f4226
+    classDef phase2 fill:#e8fbff,stroke:#00a9d6,color:#063746
+    classDef planned fill:#fff7df,stroke:#d89500,color:#4d3500,stroke-dasharray: 6 4
+    class operator,charger actor
+    class dashboard,csms,database phase1
+    class allocator phase2
+    class redis planned
