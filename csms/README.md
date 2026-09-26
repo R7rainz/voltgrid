@@ -21,6 +21,10 @@ bun run simulate:charger
 
 The simulator sends BootNotification, status updates, StartTransaction,
 MeterValues, and StopTransaction, then fetches the generated invoice.
+It exits with a non-zero status when the connection, protocol flow, or invoice
+verification fails. `CSMS_HTTP_URL`, `CSMS_WS_URL`, `CHARGER_ID`, `ID_TAG`,
+`CONNECTOR_ID`, and `SIMULATOR_TIMEOUT_MS` can be overridden for automated
+checks.
 
 The WebSocket endpoint is:
 
