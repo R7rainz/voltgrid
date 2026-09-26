@@ -51,4 +51,43 @@ describe("charger routes", () => {
             error: "Invalid site capacity or tariff",
         });
     });
+
+    test("rejects malformed station settings JSON", async () => {
+        const response = await chargerRoutes.request("/site", {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: "{",
+        });
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({
+            error: "Invalid site capacity or tariff",
+        });
+    });
+
+    test("rejects non-integer tariff values", async () => {
+        const response = await chargerRoutes.request("/site", {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                powerLimitKw: 100,
+                tariffPaisePerKwh: 800.5,
+            }),
+        });
+
+        expect(response.status).toBe(400);
+    });
+
+    test("rejects invalid invoice transaction IDs before database access", async () => {
+        const response = await chargerRoutes.request("/sessions/not-a-number/invoice");
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({
+            error: "Invalid transactionId",
+        });
+    });
 });

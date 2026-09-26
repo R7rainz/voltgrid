@@ -56,9 +56,20 @@ CHARGER_MAX_POWER_KW=50
 ## Quick checks
 
 ```sh
-curl http://localhost:6773/health
+curl http://localhost:6773/healthz
 curl http://localhost:8787/health
 ```
+
+Run the complete Phase 1 verification gate from the repository root:
+
+```sh
+./scripts/check-phase1.sh
+```
+
+The script starts an isolated PostgreSQL container, applies the Prisma
+contract, runs the CSMS unit and end-to-end tests, launches two CLI charger
+simulators through the real WebSocket route, builds the CSMS and dashboard,
+runs the Go checks, and removes the test database afterward.
 
 Then add a unique simulated charger in the dashboard and choose **Run full
 demo**. The browser sends BootNotification, status changes, StartTransaction,
