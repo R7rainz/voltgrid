@@ -2,11 +2,24 @@ const port = Number(Bun.env.PORT ?? 6773);
 const chargerId = Bun.env.CHARGER_ID ?? "sim-charger-001";
 const connectorId = Number(Bun.env.CONNECTOR_ID ?? 1);
 const idTag = Bun.env.ID_TAG ?? "SIM-DRIVER-001";
-const responseTimeoutMs = 30_000;
-const apiUrl = `http://localhost:${port}`;
+const responseTimeoutMs = Number(Bun.env.SIMULATOR_TIMEOUT_MS ?? 30_000);
+const apiUrl = Bun.env.CSMS_HTTP_URL ?? `http://localhost:${port}`;
+const socketUrl = Bun.env.CSMS_WS_URL ?? `ws://localhost:${port}`;
+
+if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("PORT must be an integer between 1 and 65535");
+}
+
+if (!chargerId.trim() || !idTag.trim()) {
+    throw new Error("CHARGER_ID and ID_TAG must not be empty");
+}
 
 if (!Number.isInteger(connectorId) || connectorId < 1) {
     throw new Error("CONNECTOR_ID must be a positive integer");
+}
+
+if (!Number.isFinite(responseTimeoutMs) || responseTimeoutMs < 1) {
+    throw new Error("SIMULATOR_TIMEOUT_MS must be a positive number");
 }
 
 type PendingRequest = {
@@ -16,10 +29,11 @@ type PendingRequest = {
 };
 
 const socket = new WebSocket(
-    `ws://localhost:${port}/ocpp/${encodeURIComponent(chargerId)}`,
+    `${socketUrl}/ocpp/${encodeURIComponent(chargerId)}`,
 );
 const pending = new Map<string, PendingRequest>();
 let requestNumber = 0;
+let completed = false;
 
 function isObject(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -89,10 +103,18 @@ socket.onmessage = (event) => {
 
 socket.onerror = () => {
     failPending(new Error("Charger simulator WebSocket error"));
+
+    if (!completed) {
+        process.exitCode = 1;
+    }
 };
 
 socket.onclose = () => {
     failPending(new Error("CSMS closed the simulator connection"));
+
+    if (!completed) {
+        process.exitCode = 1;
+    }
 };
 
 async function runSimulation() {
@@ -188,16 +210,32 @@ async function runSimulation() {
         `${apiUrl}/api/sessions/${transactionId}/invoice`,
     );
 
-    console.log(`Transaction ${transactionId} completed`);
-    console.log(`Invoice response: ${await invoiceResponse.text()}`);
+    if (!invoiceResponse.ok) {
+        throw new Error(`Invoice request returned HTTP ${invoiceResponse.status}`);
+    }
 
+    const invoicePayload = await invoiceResponse.json();
+
+    if (
+        !isObject(invoicePayload) ||
+        !isObject(invoicePayload.invoice) ||
+        invoicePayload.invoice.sessionId !== transactionId
+    ) {
+        throw new Error(`Invalid invoice response: ${JSON.stringify(invoicePayload)}`);
+    }
+
+    console.log(`Transaction ${transactionId} completed`);
+    console.log(`Invoice response: ${JSON.stringify(invoicePayload)}`);
+
+    completed = true;
     socket.close();
 }
 
 socket.onopen = () => {
-    console.log(`Connected to CSMS at ws://localhost:${port}/ocpp/${chargerId}`);
+    console.log(`Connected to CSMS at ${socketUrl}/ocpp/${chargerId}`);
     runSimulation().catch((error) => {
         console.error("Charger simulation failed:", error);
+        process.exitCode = 1;
         socket.close();
     });
 };

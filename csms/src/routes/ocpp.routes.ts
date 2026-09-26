@@ -555,6 +555,62 @@ ocppRoutes.get(
                                 };
                             }
 
+                            const repeatedMessage =
+                                await tx.orm.public.OcppMessage.select("action")
+                                    .where({
+                                        chargerId: charger.id,
+                                        messageId: uniqueId,
+                                    })
+                                    .first();
+
+                            const connector =
+                                await tx.orm.public.Connector.select("id")
+                                    .where({
+                                        chargerId: charger.id,
+                                        connectorNumber: connectorId,
+                                    })
+                                    .first();
+
+                            if (!connector) {
+                                return {
+                                    status: "Invalid" as const,
+                                    transactionId: 0,
+                                };
+                            }
+
+                            if (repeatedMessage) {
+                                if (repeatedMessage.action !== action) {
+                                    return {
+                                        status: "Invalid" as const,
+                                        transactionId: 0,
+                                    };
+                                }
+
+                                const repeatedSession =
+                                    await tx.orm.public.ChargingSession.select(
+                                        "transactionId",
+                                    )
+                                        .where({
+                                            chargerId: charger.id,
+                                            connectorId: connector.id,
+                                            idTag: idTag.trim(),
+                                            meterStartWh: meterStart,
+                                        })
+                                        .first();
+
+                                return repeatedSession
+                                    ? {
+                                          status: "Accepted" as const,
+                                          transactionId:
+                                              repeatedSession.transactionId,
+                                          siteId: charger.siteId,
+                                      }
+                                    : {
+                                          status: "Invalid" as const,
+                                          transactionId: 0,
+                                      };
+                            }
+
                             await tx.orm.public.OcppMessage.upsert({
                                 conflictOn: {
                                     chargerId: charger.id,
@@ -573,21 +629,6 @@ ocppRoutes.get(
                                     payload: payload as JsonValue,
                                 },
                             });
-
-                            const connector =
-                                await tx.orm.public.Connector.select("id")
-                                    .where({
-                                        chargerId: charger.id,
-                                        connectorNumber: connectorId,
-                                    })
-                                    .first();
-
-                            if (!connector) {
-                                return {
-                                    status: "Invalid" as const,
-                                    transactionId: 0,
-                                };
-                            }
 
                             const activeSession =
                                 await tx.orm.public.ChargingSession.select(
@@ -828,6 +869,18 @@ ocppRoutes.get(
 
                             if (!charger) {
                                 return false;
+                            }
+
+                            const repeatedMessage =
+                                await tx.orm.public.OcppMessage.select("action")
+                                    .where({
+                                        chargerId: charger.id,
+                                        messageId: uniqueId,
+                                    })
+                                    .first();
+
+                            if (repeatedMessage) {
+                                return repeatedMessage.action === action;
                             }
 
                             await tx.orm.public.OcppMessage.upsert({

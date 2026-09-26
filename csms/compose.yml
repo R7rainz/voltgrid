@@ -1,15 +1,19 @@
 services:
   postgres:
     image: postgres:18-alpine
-    container_name: voltgrid_postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: voltgrid
       POSTGRES_USER: voltgrid_dev
       POSTGRES_PASSWORD: voltgrid
     ports:
-      - "5433:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voltgrid_dev -d voltgrid"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
     volumes:
-      - voltgrid_postgres_data:/var/lib/postgresql/data
+      - voltgrid_postgres_data:/var/lib/postgresql
 volumes:
   voltgrid_postgres_data:
