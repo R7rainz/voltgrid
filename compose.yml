@@ -18,30 +18,13 @@ services:
             retries: 20
         restart: unless-stopped
 
-    load-balancer:
-        build: ./load-balancer
-        environment:
-            LOAD_BALANCER_ADDR: :8787
-        ports:
-            - "8787:8787"
-        healthcheck:
-            test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8787/health >/dev/null"]
-            interval: 3s
-            timeout: 3s
-            retries: 20
-        restart: unless-stopped
-
     csms:
         build: ./csms
         depends_on:
             postgres:
                 condition: service_healthy
-            load-balancer:
-                condition: service_healthy
         environment:
             DATABASE_URL: postgresql://voltgrid_dev:voltgrid@postgres:5432/voltgrid
-            LOAD_BALANCER_URL: http://load-balancer:8787
-            CHARGER_MAX_POWER_KW: "50"
             DASHBOARD_ORIGIN: http://localhost:9000
             PORT: "6773"
         ports:
@@ -85,8 +68,6 @@ services:
                 condition: service_healthy
             csms:
                 condition: service_healthy
-            load-balancer:
-                condition: service_healthy
         command:
             - /bin/sh
             - -c
@@ -98,7 +79,6 @@ services:
                 printf '  Dashboard       http://localhost:9000\n'
                 printf '  CSMS health     http://localhost:6773/healthz\n'
                 printf '  OCPP WebSocket  ws://localhost:6773/ocpp/{chargerId}\n'
-                printf '  Load balancer   http://localhost:8787/health\n'
                 printf '  PostgreSQL      localhost:5433\n'
                 printf '============================================================\n'
                 printf '  Stop: docker compose down\n'

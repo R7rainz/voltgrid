@@ -8,7 +8,7 @@ two phases.
 Show the supervisor:
 
 1. Start PostgreSQL/Neon, the Hono CSMS, and the Next.js dashboard.
-2. Add two or three simulated chargers with unique IDs.
+2. Add four simulated chargers with unique IDs.
 3. Connect a charger and show BootNotification acceptance.
 4. Show `Available`, `Preparing`, and `Charging` state changes.
 5. Start a session and show the transaction ID.
@@ -16,10 +16,12 @@ Show the supervisor:
 7. Stop the session and show the generated INR invoice.
 8. Refresh the dashboard or query PostgreSQL to show that the session and
    invoice are durable records.
+9. Start all four sessions at a `100 kW` site. Show the unmanaged first-come
+   result: `50 kW`, `50 kW`, `0 kW`, `0 kW`, with `100 kW` unmet demand.
 
 The key claim for Phase 1 is: VoltGrid can manage multiple simulated chargers,
 charging sessions, meter readings, and billing without physical vehicle
-hardware.
+hardware, while clearly demonstrating why smart load balancing is required.
 
 ## Phase 2: smart charging
 
@@ -33,10 +35,9 @@ Show the supervisor:
    `80 kW` each; the allocator returns `50 kW` each and `100 kW` total.
 6. Repeat after one charger stops and show that the active set is recalculated.
 
-The current Phase 2 implementation demonstrates the allocation decision and
-the capacity guarantee. It does not yet claim physical power control. The next
-implementation step is sending the returned allocation to each connected
-charger through an outbound OCPP charging-profile command.
+Phase 2 will replace the intentionally unfair first-come baseline with a fair
+allocation decision and send the result to each connected charger through an
+outbound OCPP charging-profile command.
 
 ## Questions to prepare for
 
