@@ -169,19 +169,20 @@ button:disabled {
     background: var(--green-deep);
 }
 
-.hero {
+.station-experience {
     display: grid;
-    grid-template-columns: minmax(0, 0.85fr) minmax(520px, 1.15fr);
+    grid-template-columns: minmax(300px, 0.68fr) minmax(620px, 1.32fr);
     min-height: 0;
     margin-top: 15px;
     border-top: 1px solid var(--line);
     border-bottom: 1px solid var(--line);
+    background: rgba(5, 17, 27, 0.48);
 }
 
-.hero-copy {
+.station-intro {
     align-self: center;
     max-width: 640px;
-    padding: 34px 8% 34px 7%;
+    padding: 42px 9% 42px 7%;
 }
 
 .eyebrow {
@@ -243,10 +244,14 @@ h1 span {
 }
 
 .station-floor {
+    position: relative;
     min-width: 0;
-    padding: 24px 4% 20px;
+    overflow: hidden;
+    padding: 20px 3.5% 16px;
     border-left: 1px solid var(--line);
-    background: rgba(7, 19, 29, 0.45);
+    background:
+        linear-gradient(180deg, rgba(9, 31, 42, 0.92), rgba(5, 18, 28, 0.96)),
+        repeating-linear-gradient(90deg, transparent 0 79px, rgba(115, 232, 228, 0.03) 80px);
 }
 
 .station-floor-header,
@@ -260,9 +265,10 @@ h1 span {
 }
 
 .station-floor-header {
+    position: relative;
+    z-index: 4;
     gap: 20px;
-    padding-bottom: 17px;
-    border-bottom: 1px solid var(--line);
+    padding-bottom: 13px;
 }
 
 .station-floor-header > div:first-child {
@@ -282,6 +288,51 @@ h1 span {
     font-weight: 400;
 }
 
+.floor-tariff {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    color: var(--muted);
+    font-family: "DM Mono", monospace;
+    font-size: 8px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.floor-tariff strong {
+    color: var(--green);
+    font-size: 19px;
+}
+
+.floor-tariff small {
+    color: var(--muted);
+    font-size: 8px;
+}
+
+.station-canopy {
+    position: relative;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 35px;
+    padding: 0 13px;
+    border-top: 3px solid var(--green-deep);
+    background: linear-gradient(90deg, rgba(21, 62, 65, 0.94), rgba(12, 42, 51, 0.94));
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
+    color: var(--green);
+    font-family: "DM Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+}
+
+.station-canopy small {
+    color: var(--muted);
+    font-size: 8px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
 .floor-capacity {
     gap: 11px;
     color: var(--muted);
@@ -296,162 +347,253 @@ h1 span {
 }
 
 .station-bays {
+    position: relative;
+    z-index: 2;
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-    padding: 17px 0;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px;
+    padding: 12px 0 8px;
 }
 
 .station-bay {
+    position: relative;
     min-width: 0;
-    min-height: 143px;
-    padding: 11px;
-    border: 1px solid var(--line);
-    background: rgba(12, 37, 48, 0.42);
+    min-height: 205px;
+    overflow: visible;
+    padding: 9px;
+    border: 1px solid rgba(177, 225, 233, 0.16);
+    border-bottom: 3px solid rgba(165, 255, 184, 0.22);
+    background:
+        linear-gradient(90deg, transparent 48%, rgba(255, 255, 255, 0.035) 49% 51%, transparent 52%),
+        linear-gradient(180deg, rgba(15, 43, 53, 0.7), rgba(8, 26, 36, 0.72));
+    perspective: 500px;
+}
+
+.station-bay::after {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    height: 34px;
+    border: 1px solid rgba(165, 255, 184, 0.12);
+    content: "EV";
+    color: rgba(165, 255, 184, 0.14);
+    font-family: "DM Mono", monospace;
+    font-size: 18px;
+    line-height: 34px;
+    text-align: center;
+}
+
+.station-bay.is-occupied {
+    border-bottom-color: rgba(165, 255, 184, 0.58);
 }
 
 .bay-number {
+    position: relative;
+    z-index: 4;
     display: block;
-    margin-bottom: 10px;
+    margin-bottom: 4px;
     color: var(--muted);
     font-size: 9px;
 }
 
-.arrived-vehicle {
-    display: grid;
-    gap: 11px;
+.charger-pedestal {
+    position: absolute;
+    z-index: 5;
+    top: 29px;
+    right: 8px;
+    width: 24px;
+    height: 65px;
+    border: 1px solid rgba(115, 232, 228, 0.32);
+    border-radius: 4px 4px 2px 2px;
+    background: linear-gradient(135deg, #173844, #0b202b);
+    box-shadow: 0 8px 15px rgba(0, 0, 0, 0.3);
 }
 
-.vehicle-heading {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 9px;
+.charger-pedestal::after {
+    position: absolute;
+    right: -5px;
+    bottom: -7px;
+    left: -5px;
+    height: 6px;
+    border-radius: 2px;
+    background: #102a36;
+    content: "";
 }
 
-.vehicle-symbol {
+.charger-pedestal.is-online {
+    border-color: rgba(165, 255, 184, 0.68);
+    box-shadow: 0 0 22px rgba(78, 225, 141, 0.16);
+}
+
+.charger-screen {
     display: grid;
-    width: 29px;
-    height: 29px;
-    flex: 0 0 auto;
+    width: 14px;
+    height: 17px;
+    margin: 7px auto 0;
     place-items: center;
-    border: 1px solid rgba(165, 255, 184, 0.45);
-    border-radius: 7px;
+    border: 1px solid rgba(115, 232, 228, 0.24);
+    background: #071720;
+    color: var(--muted);
+    font-size: 7px;
+}
+
+.charger-pedestal.is-online .charger-screen {
     color: var(--green);
-    font-family: "DM Mono", monospace;
-    font-size: 9px;
 }
 
-.vehicle-heading > div {
+.charger-port {
+    position: absolute;
+    right: 5px;
+    bottom: 8px;
+    width: 5px;
+    height: 8px;
+    border: 1px solid var(--cyan);
+    border-radius: 2px;
+}
+
+.charger-cable {
+    position: absolute;
+    z-index: 4;
+    top: 78px;
+    right: 20px;
+    width: 48%;
+    height: 52px;
+    border-right: 2px solid rgba(115, 232, 228, 0.2);
+    border-bottom: 2px solid rgba(115, 232, 228, 0.2);
+    border-radius: 0 0 20px 0;
+    opacity: 0;
+    transform: scale(0.6);
+    transform-origin: top right;
+    transition: 450ms ease;
+}
+
+.charger-cable.is-connected {
+    border-color: var(--green-deep);
+    opacity: 0.9;
+    transform: scale(1);
+}
+
+.scene-vehicle {
+    position: absolute;
+    z-index: 3;
+    right: 24%;
+    bottom: 21px;
+    left: 24%;
     display: grid;
-    min-width: 0;
-    gap: 3px;
-}
-
-.vehicle-heading strong {
-    overflow: hidden;
+    justify-items: center;
+    gap: 4px;
     color: var(--copy);
-    font-family: "DM Mono", monospace;
-    font-size: 12px;
-    font-weight: 400;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    text-align: center;
 }
 
-.vehicle-heading small {
+.scene-vehicle.is-arriving {
+    animation: park-vehicle 1.75s cubic-bezier(0.16, 0.8, 0.22, 1) both;
+}
+
+.vehicle-body {
+    position: relative;
+    width: 58px;
+    height: 112px;
+    border: 1px solid rgba(214, 245, 242, 0.66);
+    border-radius: 21px 21px 15px 15px;
+    background: linear-gradient(135deg, #d9e8e7 0%, #77939a 46%, #293f49 100%);
+    box-shadow: 0 15px 24px rgba(0, 0, 0, 0.38);
+}
+
+.vehicle-body::before,
+.vehicle-body::after {
+    position: absolute;
+    top: 23px;
+    bottom: 23px;
+    width: 4px;
+    border-radius: 4px;
+    background: #07131c;
+    content: "";
+}
+
+.vehicle-body::before {
+    left: -4px;
+}
+
+.vehicle-body::after {
+    right: -4px;
+}
+
+.vehicle-windshield,
+.vehicle-roof {
+    position: absolute;
+    right: 9px;
+    left: 9px;
+    border: 1px solid rgba(115, 232, 228, 0.2);
+    background: linear-gradient(135deg, #0a2431, #1e4652);
+}
+
+.vehicle-windshield {
+    top: 15px;
+    height: 25px;
+    border-radius: 10px 10px 3px 3px;
+}
+
+.vehicle-roof {
+    top: 45px;
+    height: 38px;
+    border-radius: 4px;
+}
+
+.vehicle-light {
+    position: absolute;
+    bottom: 8px;
+    width: 8px;
+    height: 3px;
+    border-radius: 2px;
+    background: #ff7979;
+    box-shadow: 0 0 8px rgba(255, 121, 121, 0.8);
+}
+
+.vehicle-light.left {
+    left: 9px;
+}
+
+.vehicle-light.right {
+    right: 9px;
+}
+
+.scene-vehicle.status-charging .vehicle-body {
+    border-color: var(--green);
+    box-shadow: 0 0 22px rgba(78, 225, 141, 0.2), 0 15px 24px rgba(0, 0, 0, 0.38);
+}
+
+.scene-vehicle strong,
+.scene-vehicle small {
+    position: relative;
+    z-index: 2;
     overflow: hidden;
-    color: var(--muted);
+    max-width: 110px;
     font-family: "DM Mono", monospace;
-    font-size: 9px;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.bay-status {
-    display: inline-block;
-    width: fit-content;
-    border-radius: 999px;
-    color: var(--muted);
-    font-family: "DM Mono", monospace;
-    font-size: 9px;
+.scene-vehicle strong {
+    font-size: 8px;
+    font-weight: 500;
+}
+
+.scene-vehicle small {
+    color: var(--green);
+    font-size: 7px;
     text-transform: uppercase;
 }
 
-.bay-status.status-available,
-.bay-status.status-charging {
-    color: var(--green);
-}
-
-.bay-status.status-preparing,
-.bay-status.status-connecting {
-    color: var(--cyan);
-}
-
-.bay-status.status-error {
-    color: var(--red);
-}
-
-.vehicle-bay-meta {
-    gap: 8px;
-    color: var(--muted);
-    font-family: "DM Mono", monospace;
-    font-size: 9px;
-}
-
-.vehicle-bay-meta span:last-child {
-    color: var(--cyan);
-}
-
-.vehicle-invoice {
-    display: grid;
-    gap: 3px;
-    padding-top: 8px;
-    border-top: 1px solid var(--line);
-    color: var(--green);
-    font-family: "DM Mono", monospace;
-    font-size: 10px;
-}
-
-.vehicle-invoice small {
-    color: var(--muted);
-    font-size: 9px;
-}
-
-.vehicle-card-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-    margin-top: 2px;
-}
-
-.vehicle-card-actions .primary-button,
-.vehicle-card-actions .secondary-button,
-.vehicle-action-button {
-    min-height: 32px;
-    min-width: 0;
-    padding: 0 7px;
-    font-size: 9px;
-    white-space: nowrap;
-}
-
-.vehicle-action-button {
-    border: 1px solid var(--line-bright);
-    background: rgba(3, 13, 22, 0.38);
-    color: var(--copy);
-}
-
-.vehicle-action-button:hover:not(:disabled) {
-    border-color: var(--cyan);
-    color: var(--cyan);
-}
-
 .empty-bay {
+    position: absolute;
+    z-index: 2;
+    inset: 49px 10px 13px;
     display: grid;
-    min-height: 108px;
     place-items: center;
     align-content: center;
     gap: 6px;
-    border: 1px dashed rgba(177, 225, 233, 0.18);
     color: var(--muted);
     text-align: center;
 }
@@ -461,12 +603,40 @@ h1 span {
     font-size: 20px;
 }
 
-.empty-bay strong,
 .empty-bay small {
     font-family: "DM Mono", monospace;
     font-size: 9px;
     font-weight: 400;
     text-transform: uppercase;
+}
+
+.station-road {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    height: 38px;
+    align-items: center;
+    justify-content: space-around;
+    overflow: hidden;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: #071019;
+    color: rgba(177, 225, 233, 0.32);
+    font-family: "DM Mono", monospace;
+    font-size: 8px;
+    letter-spacing: 0.14em;
+}
+
+.station-road i {
+    width: 13%;
+    height: 2px;
+    background: rgba(255, 227, 155, 0.48);
+}
+
+.station-road b {
+    color: var(--yellow);
+    font-size: 16px;
+    font-weight: 400;
 }
 
 .empty-bay small {
@@ -475,10 +645,33 @@ h1 span {
 
 .station-floor-footer {
     gap: 12px;
-    padding-top: 17px;
-    border-top: 1px solid var(--line);
+    padding-top: 12px;
     color: var(--muted);
     font-size: 9px;
+}
+
+.station-floor-footer span:last-child {
+    color: var(--cyan);
+}
+
+@keyframes park-vehicle {
+    0% {
+        opacity: 0;
+        transform: translateY(220px) scale(0.86);
+    }
+
+    20% {
+        opacity: 1;
+    }
+
+    72% {
+        transform: translateY(-6px) scale(1);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 .primary-button,
@@ -914,15 +1107,6 @@ input:focus {
     font-size: 9px;
 }
 
-.hero-summary {
-    display: block;
-}
-
-.hero-summary .hero-copy {
-    max-width: 760px;
-    padding: 54px 7% 46px;
-}
-
 .workspace-grid {
     display: grid;
     grid-template-columns: minmax(320px, 0.72fr) minmax(0, 1.28fr);
@@ -988,6 +1172,7 @@ input:focus {
     min-height: 300px;
     flex-direction: column;
     padding: 20px;
+    animation: card-rise 420ms ease both;
 }
 
 .card-header,
@@ -1097,6 +1282,34 @@ input:focus {
     font-weight: 400;
 }
 
+.tariff-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 14px;
+    padding: 10px 12px;
+    border: 1px solid rgba(115, 232, 228, 0.16);
+    background: rgba(115, 232, 228, 0.05);
+    color: var(--muted);
+    font-family: "DM Mono", monospace;
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.tariff-strip strong {
+    color: var(--cyan);
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: -0.04em;
+}
+
+.tariff-strip small {
+    color: var(--muted);
+    font-size: 8px;
+}
+
 .invoice-strip {
     gap: 12px;
     align-items: end;
@@ -1197,13 +1410,31 @@ input:focus {
     font-size: 12px;
 }
 
-@media (max-width: 1120px) {
-    .hero {
-        grid-template-columns: minmax(0, 0.75fr) minmax(460px, 1.25fr);
+@keyframes card-rise {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
     }
 
-    .hero-copy {
-        padding-left: 5%;
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (max-width: 1120px) {
+    .station-experience {
+        grid-template-columns: 1fr;
+    }
+
+    .station-intro {
+        max-width: 760px;
+        padding: 40px 5%;
+    }
+
+    .station-floor {
+        border-top: 1px solid var(--line);
+        border-left: 0;
     }
 
     .readout-grid {
@@ -1224,18 +1455,8 @@ input:focus {
         width: min(100% - 34px, 1460px);
     }
 
-    .hero {
-        grid-template-columns: 1fr;
-    }
-
-    .hero-copy {
-        min-height: 0;
-        padding: 34px 5% 28px;
-    }
-
-    .station-floor {
-        border-top: 1px solid var(--line);
-        border-left: 0;
+    .station-bays {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .control-grid {
@@ -1270,11 +1491,11 @@ input:focus {
         display: none;
     }
 
-    .hero {
+    .station-experience {
         margin-top: 12px;
     }
 
-    .hero-copy {
+    .station-intro {
         padding: 34px 20px 27px;
     }
 
@@ -1294,11 +1515,7 @@ input:focus {
     }
 
     .station-floor {
-        padding: 23px 14px 20px;
-    }
-
-    .station-bays {
-        grid-template-columns: 1fr;
+        padding: 18px 10px 14px;
     }
 
     .readout-grid {
@@ -1350,5 +1567,16 @@ input:focus {
     .footer-note {
         align-items: flex-start;
         flex-direction: column;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .scene-vehicle.is-arriving,
+    .charger-card {
+        animation: none;
+    }
+
+    .charger-cable {
+        transition: none;
     }
 }

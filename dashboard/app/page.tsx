@@ -36,8 +36,10 @@ type SimulatedCharger = {
     connectorId: number;
     status: ChargerStatus;
     meterWh: number;
+    arriving: boolean;
     transactionId?: number;
     invoice?: Invoice;
+    allocatedPowerKw?: number;
     error?: string;
 };
 
@@ -67,6 +69,24 @@ function formatPower(powerKw: number) {
     return `${powerKw.toFixed(powerKw % 1 === 0 ? 0 : 1)} kW`;
 }
 
+function getProfileLimitKw(payload: unknown) {
+    if (!isObject(payload) || !isObject(payload.csChargingProfiles)) {
+        return 0;
+    }
+
+    const schedule = payload.csChargingProfiles.chargingSchedule;
+
+    if (!isObject(schedule) || !Array.isArray(schedule.chargingSchedulePeriod)) {
+        return 0;
+    }
+
+    const firstPeriod = schedule.chargingSchedulePeriod[0];
+
+    return isObject(firstPeriod) && typeof firstPeriod.limit === "number"
+        ? Math.max(0, firstPeriod.limit / 1000)
+        : 0;
+}
+
 export default function Home() {
     const [chargers, setChargers] = useState<SimulatedCharger[]>([]);
     const [backendOnline, setBackendOnline] = useState(false);
@@ -81,6 +101,7 @@ export default function Home() {
     const [connectorId, setConnectorId] = useState("1");
     const sockets = useRef(new Map<string, WebSocket>());
     const pending = useRef(new Map<string, PendingRequest>());
+    const arrivalTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
     const chargersRef = useRef(chargers);
     const requestNumber = useRef(0);
 
@@ -150,6 +171,10 @@ export default function Home() {
             for (const request of pending.current.values()) {
                 clearTimeout(request.timeout);
                 request.reject(new Error("Dashboard closed"));
+            }
+
+            for (const timer of arrivalTimers.current.values()) {
+                clearTimeout(timer);
             }
         };
     }, []);
@@ -222,7 +247,38 @@ export default function Home() {
             return;
         }
 
-        const [messageType, uniqueId, payload] = message;
+        const [messageType, uniqueId, actionOrPayload] = message;
+
+        if (
+            messageType === 2 &&
+            typeof uniqueId === "string" &&
+            typeof actionOrPayload === "string"
+        ) {
+            const socket = sockets.current.get(id);
+
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                return;
+            }
+
+            if (actionOrPayload === "SetChargingProfile") {
+                const allocatedPowerKw = getProfileLimitKw(message[3]);
+                updateCharger(id, { allocatedPowerKw });
+                setDemoStatus(`${id} power profile applied · ${formatPower(allocatedPowerKw)}`);
+                socket.send(JSON.stringify([3, uniqueId, { status: "Accepted" }]));
+                return;
+            }
+
+            socket.send(
+                JSON.stringify([
+                    4,
+                    uniqueId,
+                    "NotSupported",
+                    `${actionOrPayload} is not supported by the browser simulator`,
+                    {},
+                ]),
+            );
+            return;
+        }
 
         if ((messageType !== 3 && messageType !== 4) || typeof uniqueId !== "string") {
             return;
@@ -242,7 +298,7 @@ export default function Home() {
             return;
         }
 
-        request.resolve(payload);
+        request.resolve(actionOrPayload);
         updateCharger(id, { error: undefined });
     }
 
@@ -343,11 +399,15 @@ export default function Home() {
                 timestamp: new Date().toISOString(),
             });
 
+            const transactionStatus =
+                isObject(response) && isObject(response.idTagInfo)
+                    ? response.idTagInfo.status
+                    : undefined;
+
             if (
                 !isObject(response) ||
-                response.idTagInfo === undefined ||
-                !isObject(response.idTagInfo) ||
-                response.idTagInfo.status !== "Accepted" ||
+                (transactionStatus !== "Accepted" &&
+                    transactionStatus !== "ConcurrentTx") ||
                 typeof response.transactionId !== "number"
             ) {
                 throw new Error("StartTransaction was rejected");
@@ -363,7 +423,11 @@ export default function Home() {
                 status: "Charging",
                 transactionId: response.transactionId,
             });
-            setDemoStatus(`${id} charging · load balancer engaged`);
+            setDemoStatus(
+                transactionStatus === "ConcurrentTx"
+                    ? `${id} resumed · active transaction recovered`
+                    : `${id} charging · load balancer engaged`,
+            );
         } catch (error) {
             updateCharger(id, {
                 status: "Error",
@@ -517,18 +581,34 @@ export default function Home() {
             connectorId: connector,
             status: "Offline",
             meterWh: 100_000,
+            arriving: true,
         };
         const nextChargers = [...chargersRef.current, nextCharger];
 
         chargersRef.current = nextChargers;
         setChargers(nextChargers);
-        setDemoStatus(`${id} entering the site · ready to connect`);
+        setDemoStatus(`${id} approaching · assigning bay ${nextChargers.length}`);
+
+        const timer = setTimeout(() => {
+            arrivalTimers.current.delete(id);
+            updateCharger(id, { arriving: false });
+            setDemoStatus(`${id} parked · connecting charger cable`);
+            void connectCharger(id).catch(() => undefined);
+        }, 1800);
+        arrivalTimers.current.set(id, timer);
 
         setChargerId(`demo-car-${String(nextChargers.length + 1).padStart(3, "0")}`);
         setIdTag(`DEMO-DRIVER-${String(nextChargers.length + 1).padStart(3, "0")}`);
     }
 
     function disconnectCharger(id: string) {
+        const timer = arrivalTimers.current.get(id);
+
+        if (timer) {
+            clearTimeout(timer);
+            arrivalTimers.current.delete(id);
+        }
+
         sockets.current.get(id)?.close();
         sockets.current.delete(id);
         updateCharger(id, { status: "Offline" });
@@ -595,11 +675,19 @@ export default function Home() {
     }
 
     const siteCapacityKw = site?.powerLimitKw ?? DEFAULT_SITE_CAPACITY_KW;
+    const parkedChargers = chargers.filter((charger) => !charger.arriving);
     const chargingCount = chargers.filter(
         (charger) => charger.status === "Charging",
     ).length;
     const projectedDemandKw = chargingCount * CHARGER_MAX_POWER_KW;
-    const allocatedPowerKw = Math.min(siteCapacityKw, projectedDemandKw);
+    const reportedAllocations = chargers
+        .filter((charger) => charger.status === "Charging")
+        .map((charger) => charger.allocatedPowerKw)
+        .filter((power): power is number => power !== undefined);
+    const allocatedPowerKw =
+        reportedAllocations.length === chargingCount && chargingCount > 0
+            ? reportedAllocations.reduce((total, power) => total + power, 0)
+            : Math.min(siteCapacityKw, projectedDemandKw);
     const headroomKw = Math.max(0, siteCapacityKw - allocatedPowerKw);
     const capacityPercent = siteCapacityKw
         ? Math.min(100, (allocatedPowerKw / siteCapacityKw) * 100)
@@ -624,25 +712,113 @@ export default function Home() {
                 </div>
             </header>
 
-            <section className="hero hero-summary">
-                <div className="hero-copy">
-                    <p className="eyebrow">Operator console / browser simulation</p>
+            <section className="station-experience">
+                <div className="station-intro">
+                    <p className="eyebrow">Live EV station simulation</p>
                     <h1>
-                        Operate a charging site.
-                        <span>No physical car required.</span>
+                        Watch every arrival.
+                        <span>Control every charge.</span>
                     </h1>
                     <p className="hero-text">
-                        Add virtual chargers, run the OCPP session flow, and watch meter
-                        readings and invoices update through the Hono CSMS.
+                        Send a virtual EV from the road into a charging bay. VoltGrid
+                        connects it over OCPP, tracks energy in real time, and issues the
+                        final invoice using the station tariff.
                     </p>
                     <div className="hero-actions">
                         <a className="primary-button hero-button" href="#arrival">
-                            Add a vehicle <span>+</span>
+                            Bring in a vehicle <span>→</span>
                         </a>
                         <span className="event-line">
                             <span className={`status-dot ${backendOnline ? "is-online" : ""}`} />
                             {demoStatus}
                         </span>
+                    </div>
+                </div>
+
+                <div className="station-floor" aria-label="VoltGrid charging station">
+                    <div className="station-floor-header">
+                        <div>
+                            <span className="floor-label">VoltGrid urban charging hub</span>
+                            <strong>{site?.name ?? "SITE 01"}</strong>
+                        </div>
+                        <div className="floor-tariff">
+                            <span>Live tariff</span>
+                            <strong>₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)}</strong>
+                            <small>/ kWh</small>
+                        </div>
+                    </div>
+
+                    <div className="station-canopy">
+                        <span>VOLTGRID</span>
+                        <small>{formatPower(siteCapacityKw)} site capacity</small>
+                    </div>
+
+                    <div className="station-bays">
+                        {[0, 1, 2, 3].map((bayIndex) => {
+                            const charger = chargers[bayIndex];
+                            const isConnected =
+                                charger &&
+                                !charger.arriving &&
+                                charger.status !== "Offline" &&
+                                charger.status !== "Error";
+
+                            return (
+                                <article
+                                    className={`station-bay ${charger ? "is-occupied" : ""}`}
+                                    key={bayIndex}
+                                >
+                                    <span className="bay-number">BAY {bayIndex + 1}</span>
+                                    <div
+                                        className={`charger-pedestal ${isConnected ? "is-online" : ""}`}
+                                        aria-hidden="true"
+                                    >
+                                        <span className="charger-screen">{isConnected ? "●" : "○"}</span>
+                                        <span className="charger-port" />
+                                    </div>
+                                    <span
+                                        className={`charger-cable ${isConnected ? "is-connected" : ""}`}
+                                        aria-hidden="true"
+                                    />
+
+                                    {charger ? (
+                                        <div
+                                            className={`scene-vehicle ${
+                                                charger.arriving ? "is-arriving" : "is-parked"
+                                            } status-${charger.status.toLowerCase()}`}
+                                        >
+                                            <div className="vehicle-body" aria-hidden="true">
+                                                <span className="vehicle-windshield" />
+                                                <span className="vehicle-roof" />
+                                                <span className="vehicle-light left" />
+                                                <span className="vehicle-light right" />
+                                            </div>
+                                            <strong>{charger.id}</strong>
+                                            <small>
+                                                {charger.arriving ? "Approaching" : charger.status}
+                                            </small>
+                                        </div>
+                                    ) : (
+                                        <div className="empty-bay">
+                                            <span>+</span>
+                                            <small>Ready for arrival</small>
+                                        </div>
+                                    )}
+                                </article>
+                            );
+                        })}
+                    </div>
+
+                    <div className="station-road" aria-hidden="true">
+                        <span>EV ARRIVAL LANE</span>
+                        <i />
+                        <i />
+                        <i />
+                        <b>→</b>
+                    </div>
+
+                    <div className="station-floor-footer">
+                        <span>{chargers.length} / 4 bays occupied</span>
+                        <span>{formatPower(headroomKw)} grid headroom</span>
                     </div>
                 </div>
             </section>
@@ -765,19 +941,23 @@ export default function Home() {
                         </div>
                         <span className="live-label">
                             <span className="status-dot" />
-                            {chargers.length} / 4 bays
+                            {parkedChargers.length} parked vehicle{parkedChargers.length === 1 ? "" : "s"}
                         </span>
                     </div>
 
-                    {chargers.length === 0 ? (
+                    {parkedChargers.length === 0 ? (
                         <div className="empty-state">
                             <div className="empty-icon">+</div>
-                            <h3>No simulated chargers yet</h3>
-                            <p>Add a vehicle on the left to begin the demo.</p>
+                            <h3>{chargers.length ? "Vehicle approaching" : "No vehicles on site"}</h3>
+                            <p>
+                                {chargers.length
+                                    ? "The session card will appear when the EV reaches its bay."
+                                    : "Add a vehicle on the left to begin the station simulation."}
+                            </p>
                         </div>
                     ) : (
                         <div className="charger-grid">
-                            {chargers.map((charger) => (
+                            {parkedChargers.map((charger) => (
                                 <article className="charger-card" key={charger.id}>
                                     <div className="card-header">
                                         <div>
@@ -810,8 +990,19 @@ export default function Home() {
                                         </div>
                                     </div>
                                     <div className="backend-line">
-                                        <span>Projected draw</span>
-                                        <strong>{charger.status === "Charging" ? formatPower(fairShareKw) : "0 kW"}</strong>
+                                        <span>Allocated power</span>
+                                        <strong>
+                                            {charger.status === "Charging"
+                                                ? formatPower(charger.allocatedPowerKw ?? fairShareKw)
+                                                : "0 kW"}
+                                        </strong>
+                                    </div>
+                                    <div className="tariff-strip">
+                                        <span>Station tariff</span>
+                                        <strong>
+                                            ₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)}
+                                            <small> / kWh</small>
+                                        </strong>
                                     </div>
                                     {charger.invoice ? (
                                         <div className="invoice-strip">
