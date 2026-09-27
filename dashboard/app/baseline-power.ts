@@ -1,12 +1,12 @@
 type ChargerDemand = {
     id: string;
     status: string;
+    requestedPowerKw: number;
 };
 
 export function allocateFirstComePower(
     chargers: ChargerDemand[],
     siteCapacityKw: number,
-    requestedPowerKw: number,
 ) {
     const allocations = new Map<string, number>();
     let remainingPowerKw = Math.max(0, siteCapacityKw);
@@ -17,7 +17,10 @@ export function allocateFirstComePower(
             continue;
         }
 
-        const suppliedPowerKw = Math.min(requestedPowerKw, remainingPowerKw);
+        const suppliedPowerKw = Math.min(
+            charger.requestedPowerKw,
+            remainingPowerKw,
+        );
         allocations.set(charger.id, suppliedPowerKw);
         remainingPowerKw -= suppliedPowerKw;
     }
