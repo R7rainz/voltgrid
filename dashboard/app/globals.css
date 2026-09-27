@@ -764,7 +764,7 @@ input:focus-visible {
     width: 92px;
     transform: translateX(-50%) rotate(90deg) scale(0.9);
     transform-origin: center;
-    animation: drive-and-park 3s cubic-bezier(0.3, 0.66, 0.36, 1) both;
+    animation: drive-and-park 4.8s cubic-bezier(0.3, 0.66, 0.36, 1) both;
 }
 
 .arrival-car .car-visual {
@@ -806,6 +806,229 @@ input:focus-visible {
         left: var(--target-left);
         bottom: 145px;
         transform: translateX(-50%) rotate(0deg) scale(1);
+    }
+}
+
+.vehicle-stage-card {
+    position: absolute;
+    z-index: 30;
+    top: 24px;
+    left: clamp(120px, var(--stage-left), calc(100% - 120px));
+    width: 220px;
+    min-height: 132px;
+    padding: 14px;
+    transform: translateX(-50%);
+    border: 1px solid rgba(29, 77, 59, 0.16);
+    border-radius: 15px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 15px 34px rgba(31, 48, 38, 0.2);
+    backdrop-filter: blur(10px);
+    animation: stage-card-in 420ms ease-out both;
+}
+
+.vehicle-stage-card::after {
+    position: absolute;
+    bottom: -7px;
+    left: 50%;
+    width: 14px;
+    height: 14px;
+    content: "";
+    transform: translateX(-50%) rotate(45deg);
+    border-right: 1px solid rgba(29, 77, 59, 0.16);
+    border-bottom: 1px solid rgba(29, 77, 59, 0.16);
+    background: white;
+}
+
+@keyframes stage-card-in {
+    from {
+        transform: translate(-50%, 12px) scale(0.96);
+        opacity: 0;
+    }
+}
+
+.stage-card-heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.stage-card-heading > div {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+}
+
+.stage-card-heading small,
+.stage-stats small {
+    color: var(--muted);
+    font-size: 7px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.stage-card-heading strong {
+    overflow: hidden;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ready-mark,
+.complete-mark,
+.charging-indicator,
+.stage-spinner {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    flex: 0 0 auto;
+    border-radius: 10px;
+}
+
+.ready-mark {
+    color: var(--forest);
+    background: var(--lime);
+    font-size: 18px;
+    font-weight: 900;
+}
+
+.complete-mark {
+    color: white;
+    background: var(--green);
+    font-size: 15px;
+    font-weight: 900;
+}
+
+.charging-indicator {
+    position: relative;
+    background: #e8efff;
+}
+
+.charging-indicator::before {
+    width: 9px;
+    height: 16px;
+    content: "";
+    border: 2px solid var(--blue);
+    border-radius: 2px;
+}
+
+.charging-indicator::after {
+    position: absolute;
+    top: 12px;
+    left: 14px;
+    width: 4px;
+    height: 8px;
+    content: "";
+    background: var(--blue);
+    animation: battery-fill 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes battery-fill {
+    from {
+        height: 2px;
+        transform: translateY(6px);
+    }
+}
+
+.stage-spinner {
+    border: 3px solid #dfe7e1;
+    border-top-color: var(--green);
+    animation: stage-spin 900ms linear infinite;
+}
+
+@keyframes stage-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.charging-progress {
+    height: 7px;
+    margin: 13px 0 11px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #e7ece8;
+}
+
+.charging-progress span {
+    display: block;
+    min-width: 4%;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--green), #66b987);
+    transition: width 900ms ease;
+}
+
+.stage-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.stage-stats div {
+    display: grid;
+    gap: 2px;
+}
+
+.stage-stats strong {
+    font-size: 10px;
+}
+
+.stage-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 11px 0;
+    color: var(--muted);
+    font-size: 8px;
+    font-weight: 700;
+}
+
+.stage-action {
+    width: 100%;
+    min-height: 31px;
+    padding: 0 10px;
+    color: white;
+    border: 0;
+    border-radius: 8px;
+    background: var(--forest);
+    cursor: pointer;
+    font-size: 9px;
+    font-weight: 900;
+}
+
+.stage-action:hover {
+    background: #28654e;
+}
+
+.stage-message {
+    margin: 10px 0;
+    color: var(--muted);
+    font-size: 9px;
+    line-height: 1.45;
+}
+
+.stage-charging {
+    border-color: rgba(47, 111, 237, 0.25);
+    animation: stage-card-in 420ms ease-out both, stage-live 2s ease-in-out infinite;
+}
+
+@keyframes stage-live {
+    50% {
+        box-shadow: 0 15px 38px rgba(47, 111, 237, 0.26);
+    }
+}
+
+.complete-heading {
+    animation: complete-pop 420ms ease-out both;
+}
+
+@keyframes complete-pop {
+    from {
+        transform: scale(0.94);
+        opacity: 0;
     }
 }
 
@@ -1496,14 +1719,6 @@ input:focus-visible {
         width: 88%;
     }
 
-    .station-bay:nth-child(4) {
-        display: none;
-    }
-
-    .station-bays {
-        grid-template-columns: repeat(3, 1fr);
-    }
-
     .readout-grid,
     .workspace-grid {
         grid-template-columns: 1fr;
@@ -1541,14 +1756,6 @@ input:focus-visible {
 
     .parking-area {
         top: 160px;
-    }
-
-    .station-bay:nth-child(3) {
-        display: none;
-    }
-
-    .station-bays {
-        grid-template-columns: repeat(2, 1fr);
     }
 
     .station-event {

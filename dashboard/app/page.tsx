@@ -45,6 +45,7 @@ type SimulatedCharger = {
     meterWh: number;
     arriving: boolean;
     transactionId?: number;
+    sessionStartWh?: number;
     invoice?: Invoice;
     allocatedPowerKw?: number;
     error?: string;
@@ -140,6 +141,8 @@ export default function Home() {
     const [chargerId, setChargerId] = useState("demo-car-001");
     const [idTag, setIdTag] = useState("DEMO-DRIVER-001");
     const [connectorId, setConnectorId] = useState("1");
+    const [focusedChargerId, setFocusedChargerId] = useState<string>();
+    const stationRef = useRef<HTMLElement>(null);
     const sockets = useRef(new Map<string, WebSocket>());
     const pending = useRef(new Map<string, PendingRequest>());
     const arrivalTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -227,6 +230,14 @@ export default function Home() {
 
         chargersRef.current = nextChargers;
         setChargers(nextChargers);
+    }
+
+    function showStation(id: string) {
+        setFocusedChargerId(id);
+        stationRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+        });
     }
 
     function rejectPendingForCharger(id: string, error: Error) {
@@ -463,6 +474,8 @@ export default function Home() {
             updateCharger(id, {
                 status: "Charging",
                 transactionId: response.transactionId,
+                sessionStartWh: charger.meterWh,
+                invoice: undefined,
             });
             setDemoStatus(
                 transactionStatus === "ConcurrentTx"
@@ -573,6 +586,7 @@ export default function Home() {
 
     async function runDemo(id: string) {
         try {
+            showStation(id);
             setDemoStatus(`Vehicle arrival sequence · ${id}`);
 
             if (sockets.current.get(id)?.readyState !== WebSocket.OPEN) {
@@ -580,10 +594,19 @@ export default function Home() {
             }
 
             await startSession(id);
-            await new Promise((resolve) => setTimeout(resolve, 350));
-            await addEnergy(id);
-            await new Promise((resolve) => setTimeout(resolve, 350));
-            await addEnergy(id);
+
+            if (chargersRef.current.find((charger) => charger.id === id)?.status !== "Charging") {
+                return;
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 1_200));
+
+            for (let reading = 0; reading < 4; reading += 1) {
+                await addEnergy(id);
+                await new Promise((resolve) => setTimeout(resolve, 1_200));
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 800));
             await stopSession(id);
         } catch (error) {
             updateCharger(id, {
@@ -628,14 +651,17 @@ export default function Home() {
 
         chargersRef.current = nextChargers;
         setChargers(nextChargers);
+        setFocusedChargerId(id);
         setDemoStatus(`${id} approaching · assigning bay ${nextChargers.length}`);
+
+        window.setTimeout(() => showStation(id), 80);
 
         const timer = setTimeout(() => {
             arrivalTimers.current.delete(id);
             updateCharger(id, { arriving: false });
             setDemoStatus(`${id} parked · connecting charger cable`);
             void connectCharger(id).catch(() => undefined);
-        }, 3000);
+        }, 4800);
         arrivalTimers.current.set(id, timer);
 
         setChargerId(`demo-car-${String(nextChargers.length + 1).padStart(3, "0")}`);
@@ -661,6 +687,9 @@ export default function Home() {
         const nextChargers = chargersRef.current.filter((charger) => charger.id !== id);
         chargersRef.current = nextChargers;
         setChargers(nextChargers);
+        setFocusedChargerId((current) =>
+            current === id ? nextChargers.at(-1)?.id : current,
+        );
     }
 
     async function saveSiteSettings(event: FormEvent<HTMLFormElement>) {
@@ -733,6 +762,22 @@ export default function Home() {
     const fairShareKw = chargingCount
         ? Math.min(CHARGER_MAX_POWER_KW, siteCapacityKw / chargingCount)
         : 0;
+    const focusedCharger =
+        chargers.find((charger) => charger.id === focusedChargerId) ??
+        chargers.at(-1);
+    const focusedChargerIndex = focusedCharger
+        ? chargers.findIndex((charger) => charger.id === focusedCharger.id)
+        : -1;
+    const focusedSessionEnergyKwh = focusedCharger
+        ? Math.max(
+              0,
+              (focusedCharger.meterWh -
+                  (focusedCharger.sessionStartWh ?? focusedCharger.meterWh)) /
+                  1000,
+          )
+        : 0;
+    const focusedSessionCostInr =
+        focusedSessionEnergyKwh * ((site?.tariffPaisePerKwh ?? 800) / 100);
     return (
         <main className="shell">
             <header className="topbar">
@@ -750,7 +795,7 @@ export default function Home() {
                 </div>
             </header>
 
-            <section className="station-experience">
+            <section className="station-experience" ref={stationRef}>
                 <div className="station-intro">
                     <p className="eyebrow">VoltGrid · Live station</p>
                     <h1>
@@ -883,6 +928,122 @@ export default function Home() {
                             </div>
                         ) : null,
                     )}
+
+                    {focusedCharger && !focusedCharger.arriving ? (
+                        <aside
+                            className={`vehicle-stage-card stage-${focusedCharger.status.toLowerCase()}`}
+                            style={
+                                {
+                                    "--stage-left": `${12.5 + focusedChargerIndex * 25}%`,
+                                } as CSSProperties
+                            }
+                            aria-live="polite"
+                        >
+                            {focusedCharger.status === "Charging" ? (
+                                <>
+                                    <div className="stage-card-heading">
+                                        <span className="charging-indicator" />
+                                        <div>
+                                            <small>Live charging</small>
+                                            <strong>{focusedCharger.id}</strong>
+                                        </div>
+                                    </div>
+                                    <div className="charging-progress">
+                                        <span
+                                            style={{
+                                                width: `${Math.min(100, focusedSessionEnergyKwh * 25)}%`,
+                                            }}
+                                        />
+                                    </div>
+                                    <div className="stage-stats">
+                                        <div>
+                                            <small>Energy added</small>
+                                            <strong>{focusedSessionEnergyKwh.toFixed(1)} kWh</strong>
+                                        </div>
+                                        <div>
+                                            <small>Power</small>
+                                            <strong>
+                                                {formatPower(
+                                                    focusedCharger.allocatedPowerKw ?? fairShareKw,
+                                                )}
+                                            </strong>
+                                        </div>
+                                        <div>
+                                            <small>Live cost</small>
+                                            <strong>₹{focusedSessionCostInr.toFixed(2)}</strong>
+                                        </div>
+                                    </div>
+                                </>
+                            ) : focusedCharger.invoice ? (
+                                <>
+                                    <div className="stage-card-heading complete-heading">
+                                        <span className="complete-mark">✓</span>
+                                        <div>
+                                            <small>Charging complete</small>
+                                            <strong>Invoice ₹{focusedCharger.invoice.amountInr}</strong>
+                                        </div>
+                                    </div>
+                                    <div className="stage-summary">
+                                        <span>{focusedCharger.invoice.energyKwh.toFixed(2)} kWh delivered</span>
+                                        <span>Transaction {focusedCharger.transactionId}</span>
+                                    </div>
+                                    <button
+                                        className="stage-action"
+                                        onClick={() => void runDemo(focusedCharger.id)}
+                                    >
+                                        Run another session
+                                    </button>
+                                </>
+                            ) : focusedCharger.status === "Available" ? (
+                                <>
+                                    <div className="stage-card-heading">
+                                        <span className="ready-mark">↯</span>
+                                        <div>
+                                            <small>Connected and ready</small>
+                                            <strong>{focusedCharger.id}</strong>
+                                        </div>
+                                    </div>
+                                    <div className="stage-summary">
+                                        <span>₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)} / kWh</span>
+                                        <span>Connector {focusedCharger.connectorId}</span>
+                                    </div>
+                                    <button
+                                        className="stage-action"
+                                        onClick={() => void runDemo(focusedCharger.id)}
+                                    >
+                                        Run full charging demo
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="stage-card-heading">
+                                        <span className="stage-spinner" />
+                                        <div>
+                                            <small>
+                                                {focusedCharger.status === "Error"
+                                                    ? "Connection problem"
+                                                    : "Preparing charger"}
+                                            </small>
+                                            <strong>{focusedCharger.id}</strong>
+                                        </div>
+                                    </div>
+                                    <p className="stage-message">
+                                        {focusedCharger.error ??
+                                            "Establishing the OCPP connection…"}
+                                    </p>
+                                    {focusedCharger.status === "Error" ||
+                                    focusedCharger.status === "Offline" ? (
+                                        <button
+                                            className="stage-action"
+                                            onClick={() => void runDemo(focusedCharger.id)}
+                                        >
+                                            Retry connection
+                                        </button>
+                                    ) : null}
+                                </>
+                            )}
+                        </aside>
+                    ) : null}
 
                     <div className="station-event">
                         <span className={`status-dot ${backendOnline ? "is-online" : ""}`} />
