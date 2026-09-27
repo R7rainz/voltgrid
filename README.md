@@ -22,36 +22,34 @@ load-balancer/    Go site-power allocation service
 docs/             Architecture and supervisor demo plan
 ```
 
-## Run locally
+## Run everything with Docker
 
-Use three terminals:
+Install Docker Engine with Docker Compose, then run this once from the
+repository root:
 
 ```sh
-# Terminal 1: CSMS
-cd csms
-bun install
-bun run dev
-
-# Terminal 2: Go load balancer
-cd load-balancer
-go run .
-
-# Terminal 3: dashboard
-cd dashboard
-bun install
-bun run dev
+docker compose up --build
 ```
 
-Open http://localhost:9000. The CSMS runs on port `6773`; the load balancer
-runs on port `8787`.
+Compose builds and starts PostgreSQL, the Go load balancer, the Bun/Hono CSMS,
+and the Next.js dashboard. When every service is healthy, the terminal prints
+a `VOLTGRID IS READY` banner containing these links:
 
-The CSMS reads `DATABASE_URL` from `csms/.env`. Copy `csms/.env.example` and
-use the current Neon connection string. The optional integration settings are:
+- Dashboard: `http://localhost:9000`
+- CSMS health: `http://localhost:6773/healthz`
+- OCPP WebSocket: `ws://localhost:6773/ocpp/{chargerId}`
+- Load-balancer health: `http://localhost:8787/health`
+- PostgreSQL: `localhost:5433`
 
-```env
-LOAD_BALANCER_URL=http://localhost:8787
-CHARGER_MAX_POWER_KW=50
+Press `Ctrl+C` to stop the foreground logs. Remove the containers afterward
+with:
+
+```sh
+docker compose down
 ```
+
+To run in the background instead, use `docker compose up --build -d`, followed
+by `docker compose logs info` to print the same link banner.
 
 ## Quick checks
 
