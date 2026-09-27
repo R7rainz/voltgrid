@@ -263,6 +263,108 @@ phase1("Phase 1 end-to-end", () => {
         await client.close();
     });
 
+    test("allows request IDs to restart after a charger reconnects", async () => {
+        const chargerId = `reconnect-${crypto.randomUUID()}`;
+        const url = `${websocketUrl}/ocpp/${chargerId}`;
+        const first = await OcppClient.connect(url);
+
+        await first.call(
+            "BootNotification",
+            {
+                chargePointVendor: "VoltGrid Tests",
+                chargePointModel: "Reconnect Charger",
+            },
+            "reused-1",
+        );
+
+        for (const uniqueId of ["reused-2", "reused-3", "reused-4"]) {
+            await first.call(
+                "StatusNotification",
+                {
+                    connectorId: 1,
+                    status: "Available",
+                    errorCode: "NoError",
+                },
+                uniqueId,
+            );
+        }
+
+        await first.close();
+
+        const second = await OcppClient.connect(url);
+        await second.call(
+            "BootNotification",
+            {
+                chargePointVendor: "VoltGrid Tests",
+                chargePointModel: "Reconnect Charger",
+            },
+            "reused-1",
+        );
+        await second.call(
+            "StatusNotification",
+            {
+                connectorId: 1,
+                status: "Available",
+                errorCode: "NoError",
+            },
+            "reused-2",
+        );
+
+        const start = await second.call(
+            "StartTransaction",
+            {
+                connectorId: 1,
+                idTag: `driver-${crypto.randomUUID()}`,
+                meterStart: 100_000,
+                timestamp: new Date().toISOString(),
+            },
+            "reused-3",
+        );
+        const transactionId = (start[2] as { transactionId: number })
+            .transactionId;
+        if (!Number.isInteger(transactionId) || transactionId < 1) {
+            throw new Error(
+                `Invalid transaction response: ${JSON.stringify(start)}`,
+            );
+        }
+        expect(start[2]).toMatchObject({
+            transactionId,
+            idTagInfo: { status: "Accepted" },
+        });
+        expect(
+            await second.call(
+                "MeterValues",
+                {
+                    connectorId: 1,
+                    transactionId,
+                    meterValue: [
+                        {
+                            timestamp: new Date().toISOString(),
+                            sampledValue: [
+                                {
+                                    value: "101000",
+                                    measurand: "Energy.Active.Import.Register",
+                                    unit: "Wh",
+                                },
+                            ],
+                        },
+                    ],
+                },
+                "reused-4",
+            ),
+        ).toEqual([3, "reused-4", {}]);
+
+        const stop = await second.call("StopTransaction", {
+            transactionId,
+            meterStop: 101_000,
+            timestamp: new Date().toISOString(),
+            reason: "Local",
+        });
+        expect(stop[2]).toEqual({ idTagInfo: { status: "Accepted" } });
+
+        await second.close();
+    });
+
     test("persists one idempotent session, meter reading, and invoice", async () => {
         const chargerId = `phase1-${crypto.randomUUID()}`;
         const idTag = `driver-${crypto.randomUUID()}`;
@@ -419,7 +521,7 @@ phase1("Phase 1 end-to-end", () => {
         await client.close();
     });
 
-    test("runs two complete CLI simulator sessions concurrently", async () => {
+    test("runs four complete charger sessions concurrently", async () => {
         const runSimulator = async (number: number) => {
             const chargerId = `cli-${number}-${crypto.randomUUID()}`;
             const child = Bun.spawn(
@@ -446,7 +548,9 @@ phase1("Phase 1 end-to-end", () => {
             return { chargerId, exitCode, stdout, stderr };
         };
 
-        const results = await Promise.all([runSimulator(1), runSimulator(2)]);
+        const results = await Promise.all(
+            [1, 2, 3, 4].map(runSimulator),
+        );
 
         for (const result of results) {
             if (result.exitCode !== 0) {

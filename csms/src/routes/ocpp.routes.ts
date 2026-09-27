@@ -6,7 +6,6 @@ import {
     markChargerSeen,
     updateConnectorStatus,
 } from "../modules/chargers/charger-state";
-import { rebalanceSite } from "../modules/load-balancer/load-balancer-client";
 import { db } from "../infrastructure/database/db";
 import type { JsonValue } from "@prisma/orm-postgres/target/codec-types";
 
@@ -118,6 +117,7 @@ ocppRoutes.get(
     "/ocpp/:chargerId",
     upgradeWebSocket((c) => {
         const chargerId = c.req.param("chargerId");
+        const connectionId = crypto.randomUUID();
 
         return {
             onOpen(_event, ws) {
@@ -185,6 +185,9 @@ ocppRoutes.get(
                 console.log(`Received ${action} from ${chargerId}`);
 
                 markChargerSeen(String(chargerId));
+
+                // OCPP unique IDs only correlate messages within one connection.
+                const storedMessageId = `${connectionId}:${uniqueId}`;
 
                 if (action === "Heartbeat") {
                     if (!isJsonObject(payload)) {
@@ -290,10 +293,10 @@ ocppRoutes.get(
                             await tx.orm.public.OcppMessage.upsert({
                                 conflictOn: {
                                     chargerId: charger.id,
-                                    messageId: uniqueId,
+                                    messageId: storedMessageId,
                                 },
                                 create: {
-                                    messageId: uniqueId,
+                                    messageId: storedMessageId,
                                     action,
                                     direction: "inbound",
                                     payload: payload as JsonValue,
@@ -421,10 +424,10 @@ ocppRoutes.get(
                             await tx.orm.public.OcppMessage.upsert({
                                 conflictOn: {
                                     chargerId: charger.id,
-                                    messageId: uniqueId,
+                                    messageId: storedMessageId,
                                 },
                                 create: {
-                                    messageId: uniqueId,
+                                    messageId: storedMessageId,
                                     action,
                                     direction: "inbound",
                                     payload: payload as JsonValue,
@@ -561,7 +564,7 @@ ocppRoutes.get(
                                 await tx.orm.public.OcppMessage.select("action")
                                     .where({
                                         chargerId: charger.id,
-                                        messageId: uniqueId,
+                                        messageId: storedMessageId,
                                     })
                                     .first();
 
@@ -627,10 +630,10 @@ ocppRoutes.get(
                             await tx.orm.public.OcppMessage.upsert({
                                 conflictOn: {
                                     chargerId: charger.id,
-                                    messageId: uniqueId,
+                                    messageId: storedMessageId,
                                 },
                                 create: {
-                                    messageId: uniqueId,
+                                    messageId: storedMessageId,
                                     action,
                                     direction: "inbound",
                                     payload: payload as JsonValue,
@@ -725,9 +728,6 @@ ocppRoutes.get(
                             `StartTransaction ${result.status.toLowerCase()} for ${chargerId}`,
                         );
 
-                        if (result.status !== "Invalid") {
-                            void rebalanceSite(result.siteId);
-                        }
                     } catch (error) {
                         console.error(
                             `Failed to start transaction for charger ${chargerId}:`,
@@ -896,7 +896,7 @@ ocppRoutes.get(
                                 await tx.orm.public.OcppMessage.select("action")
                                     .where({
                                         chargerId: charger.id,
-                                        messageId: uniqueId,
+                                        messageId: storedMessageId,
                                     })
                                     .first();
 
@@ -907,10 +907,10 @@ ocppRoutes.get(
                             await tx.orm.public.OcppMessage.upsert({
                                 conflictOn: {
                                     chargerId: charger.id,
-                                    messageId: uniqueId,
+                                    messageId: storedMessageId,
                                 },
                                 create: {
-                                    messageId: uniqueId,
+                                    messageId: storedMessageId,
                                     action,
                                     direction: "inbound",
                                     payload: payload as JsonValue,
@@ -1151,10 +1151,10 @@ ocppRoutes.get(
                             await tx.orm.public.OcppMessage.upsert({
                                 conflictOn: {
                                     chargerId: charger.id,
-                                    messageId: uniqueId,
+                                    messageId: storedMessageId,
                                 },
                                 create: {
-                                    messageId: uniqueId,
+                                    messageId: storedMessageId,
                                     action,
                                     direction: "inbound",
                                     payload: payload as JsonValue,
@@ -1256,9 +1256,6 @@ ocppRoutes.get(
                             `StopTransaction ${result.status.toLowerCase()} for ${chargerId}`,
                         );
 
-                        if (result.status === "Accepted") {
-                            void rebalanceSite(result.siteId);
-                        }
                     } catch (error) {
                         console.error(
                             `Failed to stop transaction for charger ${chargerId}:`,
