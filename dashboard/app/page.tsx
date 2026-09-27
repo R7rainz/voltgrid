@@ -395,11 +395,15 @@ export default function Home() {
                 timestamp: new Date().toISOString(),
             });
 
+            const transactionStatus =
+                isObject(response) && isObject(response.idTagInfo)
+                    ? response.idTagInfo.status
+                    : undefined;
+
             if (
                 !isObject(response) ||
-                response.idTagInfo === undefined ||
-                !isObject(response.idTagInfo) ||
-                response.idTagInfo.status !== "Accepted" ||
+                (transactionStatus !== "Accepted" &&
+                    transactionStatus !== "ConcurrentTx") ||
                 typeof response.transactionId !== "number"
             ) {
                 throw new Error("StartTransaction was rejected");
@@ -415,7 +419,11 @@ export default function Home() {
                 status: "Charging",
                 transactionId: response.transactionId,
             });
-            setDemoStatus(`${id} charging · load balancer engaged`);
+            setDemoStatus(
+                transactionStatus === "ConcurrentTx"
+                    ? `${id} resumed · active transaction recovered`
+                    : `${id} charging · load balancer engaged`,
+            );
         } catch (error) {
             updateCharger(id, {
                 status: "Error",
