@@ -313,6 +313,7 @@ phase1("Phase 1 end-to-end", () => {
 
         expect(start[2]).toMatchObject({
             transactionId: expect.any(Number),
+            meterWh: 100_000,
             idTagInfo: { status: "Accepted" },
         });
         expect(repeatedStart[2]).toEqual(start[2]);
@@ -357,6 +358,16 @@ phase1("Phase 1 end-to-end", () => {
             .where({ sessionId: transactionId })
             .all();
         expect(readings).toHaveLength(1);
+
+        const resumedStart = await client.call("StartTransaction", {
+            ...startPayload,
+            timestamp: new Date().toISOString(),
+        });
+        expect(resumedStart[2]).toMatchObject({
+            transactionId,
+            meterWh: 102_500,
+            idTagInfo: { status: "ConcurrentTx" },
+        });
 
         const stopId = `stop-${crypto.randomUUID()}`;
         const stopPayload = {

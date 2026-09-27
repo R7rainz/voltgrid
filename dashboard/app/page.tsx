@@ -460,6 +460,12 @@ export default function Home() {
                 throw new Error("StartTransaction was rejected");
             }
 
+            const meterWh =
+                transactionStatus === "ConcurrentTx" &&
+                typeof response.meterWh === "number"
+                    ? Math.max(charger.meterWh, response.meterWh)
+                    : charger.meterWh;
+
             await sendCall(id, "StatusNotification", {
                 connectorId: charger.connectorId,
                 status: "Charging",
@@ -469,7 +475,8 @@ export default function Home() {
             updateCharger(id, {
                 status: "Charging",
                 transactionId: response.transactionId,
-                sessionStartWh: charger.meterWh,
+                meterWh,
+                sessionStartWh: meterWh,
                 invoice: undefined,
             });
             setDemoStatus(

@@ -552,6 +552,8 @@ ocppRoutes.get(
                                 return {
                                     status: "Invalid" as const,
                                     transactionId: 0,
+                                    meterWh: 0,
+                                    siteId: 0,
                                 };
                             }
 
@@ -575,6 +577,8 @@ ocppRoutes.get(
                                 return {
                                     status: "Invalid" as const,
                                     transactionId: 0,
+                                    meterWh: 0,
+                                    siteId: 0,
                                 };
                             }
 
@@ -583,12 +587,16 @@ ocppRoutes.get(
                                     return {
                                         status: "Invalid" as const,
                                         transactionId: 0,
+                                        meterWh: 0,
+                                        siteId: 0,
                                     };
                                 }
 
                                 const repeatedSession =
                                     await tx.orm.public.ChargingSession.select(
                                         "transactionId",
+                                        "meterStartWh",
+                                        "lastMeterWh",
                                     )
                                         .where({
                                             chargerId: charger.id,
@@ -603,11 +611,16 @@ ocppRoutes.get(
                                           status: "Accepted" as const,
                                           transactionId:
                                               repeatedSession.transactionId,
+                                          meterWh:
+                                              repeatedSession.lastMeterWh ??
+                                              repeatedSession.meterStartWh,
                                           siteId: charger.siteId,
                                       }
                                     : {
                                           status: "Invalid" as const,
                                           transactionId: 0,
+                                          meterWh: 0,
+                                          siteId: 0,
                                       };
                             }
 
@@ -633,6 +646,8 @@ ocppRoutes.get(
                             const activeSession =
                                 await tx.orm.public.ChargingSession.select(
                                     "transactionId",
+                                    "meterStartWh",
+                                    "lastMeterWh",
                                 )
                                     .where({
                                         connectorId: connector.id,
@@ -644,6 +659,10 @@ ocppRoutes.get(
                                 return {
                                     status: "ConcurrentTx" as const,
                                     transactionId: activeSession.transactionId,
+                                    meterWh:
+                                        activeSession.lastMeterWh ??
+                                        activeSession.meterStartWh,
+                                    siteId: charger.siteId,
                                 };
                             }
 
@@ -674,11 +693,12 @@ ocppRoutes.get(
                             return {
                                 status: "Accepted" as const,
                                 transactionId: session.transactionId,
+                                meterWh: meterStart,
                                 siteId: charger.siteId,
                             };
                         });
 
-                        if (result.status === "Accepted") {
+                        if (result.status !== "Invalid") {
                             updateConnectorStatus(
                                 String(chargerId),
                                 connectorId,
@@ -693,6 +713,7 @@ ocppRoutes.get(
                                 uniqueId,
                                 {
                                     transactionId: result.transactionId,
+                                    meterWh: result.meterWh,
                                     idTagInfo: {
                                         status: result.status,
                                     },
@@ -704,7 +725,7 @@ ocppRoutes.get(
                             `StartTransaction ${result.status.toLowerCase()} for ${chargerId}`,
                         );
 
-                        if (result.status === "Accepted") {
+                        if (result.status !== "Invalid") {
                             void rebalanceSite(result.siteId);
                         }
                     } catch (error) {
