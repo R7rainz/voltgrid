@@ -8,6 +8,8 @@ import {
     useState,
 } from "react";
 
+import { allocateFirstComePower } from "./baseline-power";
+
 const CSMS_HTTP_URL =
     process.env.NEXT_PUBLIC_CSMS_HTTP_URL ?? "http://localhost:6773";
 const CSMS_WS_URL =
@@ -482,7 +484,7 @@ export default function Home() {
             setDemoStatus(
                 transactionStatus === "ConcurrentTx"
                     ? `${id} resumed · active transaction recovered`
-                    : `${id} charging · load balancer engaged`,
+                    : `${id} charging · unmanaged 50 kW request accepted`,
             );
         } catch (error) {
             updateCharger(id, {
@@ -500,7 +502,23 @@ export default function Home() {
             return;
         }
 
-        const meterWh = charger.meterWh + 1000;
+        const suppliedPowerKw =
+            allocateFirstComePower(
+                chargersRef.current,
+                site?.powerLimitKw ?? DEFAULT_SITE_CAPACITY_KW,
+                CHARGER_MAX_POWER_KW,
+            ).get(id) ?? 0;
+
+        if (suppliedPowerKw === 0) {
+            setDemoStatus(`${id} waiting · no site power remains`);
+            return;
+        }
+
+        const addedWh = Math.max(
+            1,
+            Math.round((1000 * suppliedPowerKw) / CHARGER_MAX_POWER_KW),
+        );
+        const meterWh = charger.meterWh + addedWh;
 
         try {
             await sendCall(id, "MeterValues", {
@@ -521,7 +539,11 @@ export default function Home() {
             });
 
             updateCharger(id, { meterWh });
-            setDemoStatus(`${id} meter updated · +1.0 kWh recorded`);
+            setDemoStatus(
+                `${id} receiving ${formatPower(suppliedPowerKw)} · +${(
+                    addedWh / 1000
+                ).toFixed(1)} kWh recorded`,
+            );
         } catch (error) {
             updateCharger(id, {
                 status: "Error",
@@ -750,17 +772,16 @@ export default function Home() {
         (charger) => charger.status === "Charging",
     ).length;
     const projectedDemandKw = chargingCount * CHARGER_MAX_POWER_KW;
-    const reportedAllocations = chargers
-        .filter((charger) => charger.status === "Charging")
-        .map((charger) => charger.allocatedPowerKw)
-        .filter((power): power is number => power !== undefined);
-    const allocatedPowerKw =
-        reportedAllocations.length === chargingCount && chargingCount > 0
-            ? reportedAllocations.reduce((total, power) => total + power, 0)
-            : Math.min(siteCapacityKw, projectedDemandKw);
-    const fairShareKw = chargingCount
-        ? Math.min(CHARGER_MAX_POWER_KW, siteCapacityKw / chargingCount)
-        : 0;
+    const baselinePowerById = allocateFirstComePower(
+        chargers,
+        siteCapacityKw,
+        CHARGER_MAX_POWER_KW,
+    );
+    const suppliedPowerKw = [...baselinePowerById.values()].reduce(
+        (total, power) => total + power,
+        0,
+    );
+    const unmetDemandKw = Math.max(0, projectedDemandKw - suppliedPowerKw);
     const focusedCharger =
         chargers.find((charger) => charger.id === focusedChargerId) ??
         chargers.at(-1);
@@ -898,6 +919,8 @@ export default function Home() {
                         const focusedSessionCostInr =
                             focusedSessionEnergyKwh *
                             ((site?.tariffPaisePerKwh ?? 800) / 100);
+                        const focusedPowerKw =
+                            baselinePowerById.get(focusedCharger.id) ?? 0;
 
                         return (
                         <aside
@@ -935,11 +958,15 @@ export default function Home() {
                                             <strong>{focusedSessionEnergyKwh.toFixed(1)} kWh</strong>
                                         </div>
                                         <div>
-                                            <small>Power</small>
-                                            <strong>
-                                                {formatPower(
-                                                    focusedCharger.allocatedPowerKw ?? fairShareKw,
-                                                )}
+                                            <small>Power received</small>
+                                            <strong
+                                                className={
+                                                    focusedPowerKw < CHARGER_MAX_POWER_KW
+                                                        ? "power-shortfall"
+                                                        : undefined
+                                                }
+                                            >
+                                                {formatPower(focusedPowerKw)} / 50 kW
                                             </strong>
                                         </div>
                                         <div>
@@ -979,7 +1006,7 @@ export default function Home() {
                                     </div>
                                     <div className="stage-summary">
                                         <span>₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)} / kWh</span>
-                                        <span>Connector {focusedCharger.connectorId}</span>
+                                        <span>Requests 50 kW</span>
                                     </div>
                                     <button
                                         className="stage-action"
@@ -1020,6 +1047,15 @@ export default function Home() {
                         );
                     })}
 
+                    {unmetDemandKw > 0 ? (
+                        <div className="power-warning" role="status">
+                            <strong>No smart balancing</strong>
+                            <span>
+                                {formatPower(unmetDemandKw)} unmet · later arrivals lose power
+                            </span>
+                        </div>
+                    ) : null}
+
                     <div className="station-event">
                         <span className={`status-dot ${backendOnline ? "is-online" : ""}`} />
                         <strong>{demoStatus}</strong>
@@ -1028,7 +1064,10 @@ export default function Home() {
                     <div className="station-floor-footer">
                         <span>{chargers.length} of 4 bays occupied</span>
                         <span>
-                            {formatPower(allocatedPowerKw)} allocated / {formatPower(siteCapacityKw)} capacity
+                            {formatPower(suppliedPowerKw)} claimed / {formatPower(siteCapacityKw)} capacity
+                            {unmetDemandKw > 0
+                                ? ` · ${formatPower(unmetDemandKw)} unmet`
+                                : ""}
                         </span>
                     </div>
                 </div>
@@ -1194,7 +1233,9 @@ export default function Home() {
                                         <span>Allocated power</span>
                                         <strong>
                                             {charger.status === "Charging"
-                                                ? formatPower(charger.allocatedPowerKw ?? fairShareKw)
+                                                ? formatPower(
+                                                      baselinePowerById.get(charger.id) ?? 0,
+                                                  )
                                                 : "0 kW"}
                                         </strong>
                                     </div>

@@ -33,8 +33,3 @@ POSTGRES_PORT="${database_port}" docker compose \
     cd "${repository_dir}/dashboard"
     bun run build
 )
-
-(
-    cd "${repository_dir}/load-balancer"
-    GOCACHE="${GOCACHE:-/tmp/voltgrid-go-build}" go test ./...
-)
