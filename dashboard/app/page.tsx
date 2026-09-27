@@ -15,7 +15,7 @@ const CSMS_HTTP_URL =
 const CSMS_WS_URL =
     process.env.NEXT_PUBLIC_CSMS_WS_URL ?? "ws://localhost:6773";
 const DEFAULT_SITE_CAPACITY_KW = 100;
-const CHARGER_MAX_POWER_KW = 50;
+const DEFAULT_CAR_POWER_KW = 50;
 const CAR_COLORS = ["#2f6fed", "#e45d3f", "#25866f", "#7657c8"];
 
 type ChargerStatus =
@@ -43,6 +43,7 @@ type SimulatedCharger = {
     id: string;
     idTag: string;
     connectorId: number;
+    requestedPowerKw: number;
     status: ChargerStatus;
     meterWh: number;
     arriving: boolean;
@@ -143,6 +144,9 @@ export default function Home() {
     const [chargerId, setChargerId] = useState("demo-car-001");
     const [idTag, setIdTag] = useState("DEMO-DRIVER-001");
     const [connectorId, setConnectorId] = useState("1");
+    const [requestedPowerInput, setRequestedPowerInput] = useState(
+        String(DEFAULT_CAR_POWER_KW),
+    );
     const [focusedChargerId, setFocusedChargerId] = useState<string>();
     const sockets = useRef(new Map<string, WebSocket>());
     const pending = useRef(new Map<string, PendingRequest>());
@@ -484,7 +488,7 @@ export default function Home() {
             setDemoStatus(
                 transactionStatus === "ConcurrentTx"
                     ? `${id} resumed · active transaction recovered`
-                    : `${id} charging · unmanaged 50 kW request accepted`,
+                    : `${id} charging · unmanaged ${formatPower(charger.requestedPowerKw)} request accepted`,
             );
         } catch (error) {
             updateCharger(id, {
@@ -506,7 +510,6 @@ export default function Home() {
             allocateFirstComePower(
                 chargersRef.current,
                 site?.powerLimitKw ?? DEFAULT_SITE_CAPACITY_KW,
-                CHARGER_MAX_POWER_KW,
             ).get(id) ?? 0;
 
         if (suppliedPowerKw === 0) {
@@ -516,7 +519,7 @@ export default function Home() {
 
         const addedWh = Math.max(
             1,
-            Math.round((1000 * suppliedPowerKw) / CHARGER_MAX_POWER_KW),
+            Math.round((1000 * suppliedPowerKw) / charger.requestedPowerKw),
         );
         const meterWh = charger.meterWh + addedWh;
 
@@ -652,12 +655,15 @@ export default function Home() {
         const id = chargerId.trim();
         const tag = idTag.trim();
         const connector = Number(connectorId);
+        const requestedPowerKw = Number(requestedPowerInput);
 
         if (
             !id ||
             !tag ||
             !Number.isInteger(connector) ||
             connector < 1 ||
+            !Number.isFinite(requestedPowerKw) ||
+            requestedPowerKw < 0 ||
             chargersRef.current.some((charger) => charger.id === id)
         ) {
             return;
@@ -667,6 +673,7 @@ export default function Home() {
             id,
             idTag: tag,
             connectorId: connector,
+            requestedPowerKw,
             status: "Offline",
             meterWh: 100_000,
             arriving: true,
@@ -771,11 +778,12 @@ export default function Home() {
     const chargingCount = chargers.filter(
         (charger) => charger.status === "Charging",
     ).length;
-    const projectedDemandKw = chargingCount * CHARGER_MAX_POWER_KW;
+    const projectedDemandKw = chargers
+        .filter((charger) => charger.status === "Charging")
+        .reduce((total, charger) => total + charger.requestedPowerKw, 0);
     const baselinePowerById = allocateFirstComePower(
         chargers,
         siteCapacityKw,
-        CHARGER_MAX_POWER_KW,
     );
     const suppliedPowerKw = [...baselinePowerById.values()].reduce(
         (total, power) => total + power,
@@ -961,12 +969,12 @@ export default function Home() {
                                             <small>Power received</small>
                                             <strong
                                                 className={
-                                                    focusedPowerKw < CHARGER_MAX_POWER_KW
+                                                    focusedPowerKw < focusedCharger.requestedPowerKw
                                                         ? "power-shortfall"
                                                         : undefined
                                                 }
                                             >
-                                                {formatPower(focusedPowerKw)} / 50 kW
+                                                {formatPower(focusedPowerKw)} / {formatPower(focusedCharger.requestedPowerKw)}
                                             </strong>
                                         </div>
                                         <div>
@@ -1006,7 +1014,7 @@ export default function Home() {
                                     </div>
                                     <div className="stage-summary">
                                         <span>₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)} / kWh</span>
-                                        <span>Requests 50 kW</span>
+                                        <span>Requests {formatPower(focusedCharger.requestedPowerKw)}</span>
                                     </div>
                                     <button
                                         className="stage-action"
@@ -1049,9 +1057,9 @@ export default function Home() {
 
                     {unmetDemandKw > 0 ? (
                         <div className="power-warning" role="status">
-                            <strong>No smart balancing</strong>
+                            <strong>Load balancing problem</strong>
                             <span>
-                                {formatPower(unmetDemandKw)} unmet · later arrivals lose power
+                                {formatPower(projectedDemandKw)} requested exceeds the {formatPower(siteCapacityKw)} site limit. {formatPower(unmetDemandKw)} of demand is unmet.
                             </span>
                         </div>
                     ) : null}
@@ -1064,10 +1072,8 @@ export default function Home() {
                     <div className="station-floor-footer">
                         <span>{chargers.length} of 4 bays occupied</span>
                         <span>
-                            {formatPower(suppliedPowerKw)} claimed / {formatPower(siteCapacityKw)} capacity
-                            {unmetDemandKw > 0
-                                ? ` · ${formatPower(unmetDemandKw)} unmet`
-                                : ""}
+                            Site limit {formatPower(siteCapacityKw)} · Demand {formatPower(projectedDemandKw)} · Supplied {formatPower(suppliedPowerKw)}
+                            {unmetDemandKw > 0 ? ` · Unmet ${formatPower(unmetDemandKw)}` : ""}
                         </span>
                     </div>
                 </div>
@@ -1110,6 +1116,18 @@ export default function Home() {
                                 min="1"
                                 value={connectorId}
                                 onChange={(event) => setConnectorId(event.target.value)}
+                            />
+                        </label>
+                        <label>
+                            Max power request (kW)
+                            <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={requestedPowerInput}
+                                onChange={(event) =>
+                                    setRequestedPowerInput(event.target.value)
+                                }
                             />
                         </label>
                         <button type="submit" className="primary-button">
