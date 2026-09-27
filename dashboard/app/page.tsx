@@ -142,7 +142,6 @@ export default function Home() {
     const [idTag, setIdTag] = useState("DEMO-DRIVER-001");
     const [connectorId, setConnectorId] = useState("1");
     const [focusedChargerId, setFocusedChargerId] = useState<string>();
-    const stationRef = useRef<HTMLElement>(null);
     const sockets = useRef(new Map<string, WebSocket>());
     const pending = useRef(new Map<string, PendingRequest>());
     const arrivalTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -234,10 +233,6 @@ export default function Home() {
 
     function showStation(id: string) {
         setFocusedChargerId(id);
-        stationRef.current?.scrollIntoView({
-            behavior: "smooth",
-            block: "center",
-        });
     }
 
     function rejectPendingForCharger(id: string, error: Error) {
@@ -654,8 +649,6 @@ export default function Home() {
         setFocusedChargerId(id);
         setDemoStatus(`${id} approaching · assigning bay ${nextChargers.length}`);
 
-        window.setTimeout(() => showStation(id), 80);
-
         const timer = setTimeout(() => {
             arrivalTimers.current.delete(id);
             updateCharger(id, { arriving: false });
@@ -758,7 +751,6 @@ export default function Home() {
         reportedAllocations.length === chargingCount && chargingCount > 0
             ? reportedAllocations.reduce((total, power) => total + power, 0)
             : Math.min(siteCapacityKw, projectedDemandKw);
-    const headroomKw = Math.max(0, siteCapacityKw - allocatedPowerKw);
     const fairShareKw = chargingCount
         ? Math.min(CHARGER_MAX_POWER_KW, siteCapacityKw / chargingCount)
         : 0;
@@ -795,38 +787,7 @@ export default function Home() {
                 </div>
             </header>
 
-            <section className="station-experience" ref={stationRef}>
-                <div className="station-intro">
-                    <p className="eyebrow">VoltGrid · Live station</p>
-                    <h1>
-                        A real charging stop.
-                        <span>Simulated end to end.</span>
-                    </h1>
-                    <p className="hero-text">
-                        Bring an EV in from the street, park it under the solar canopy,
-                        connect the charger, and follow the complete session through to
-                        its final invoice.
-                    </p>
-                    <div className="hero-actions">
-                        <a className="primary-button hero-button" href="#arrival">
-                            Add an arriving car <span>→</span>
-                        </a>
-                    </div>
-                    <div className="station-quick-info">
-                        <div>
-                            <span>Today&apos;s tariff</span>
-                            <strong>
-                                ₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)}
-                                <small>/kWh</small>
-                            </strong>
-                        </div>
-                        <div>
-                            <span>Available power</span>
-                            <strong>{formatPower(headroomKw)}</strong>
-                        </div>
-                    </div>
-                </div>
-
+            <section className="station-experience">
                 <div className="station-floor" aria-label="VoltGrid charging station">
                     <div className="station-landscape" aria-hidden="true">
                         <span className="distant-building building-one" />
@@ -1052,36 +1013,11 @@ export default function Home() {
 
                     <div className="station-floor-footer">
                         <span>{chargers.length} of 4 bays occupied</span>
-                        <span>{formatPower(siteCapacityKw)} total capacity</span>
+                        <span>
+                            {formatPower(allocatedPowerKw)} allocated / {formatPower(siteCapacityKw)} capacity
+                        </span>
                     </div>
                 </div>
-            </section>
-
-            <section className="readout-grid" aria-label="Simulation summary">
-                <article className="readout-card featured-readout">
-                    <div className="readout-icon capacity-icon">↯</div>
-                    <div>
-                        <span className="readout-label">Site capacity</span>
-                        <strong>{formatPower(siteCapacityKw)}</strong>
-                        <small>{site ? "Database-backed limit" : "CSMS configuration unavailable"}</small>
-                    </div>
-                </article>
-                <article className="readout-card">
-                    <div className="readout-icon draw-icon">≋</div>
-                    <div>
-                        <span className="readout-label">Active sessions</span>
-                        <strong>{String(chargingCount).padStart(2, "0")}</strong>
-                        <small>{formatPower(allocatedPowerKw)} projected allocation</small>
-                    </div>
-                </article>
-                <article className="readout-card">
-                    <div className="readout-icon headroom-icon">+</div>
-                    <div>
-                        <span className="readout-label">Available headroom</span>
-                        <strong>{formatPower(headroomKw)}</strong>
-                        <small>{chargers.length} simulated charger{chargers.length === 1 ? "" : "s"}</small>
-                    </div>
-                </article>
             </section>
 
             <section className="workspace-grid" id="arrival">
@@ -1192,7 +1128,21 @@ export default function Home() {
                     ) : (
                         <div className="charger-grid">
                             {parkedChargers.map((charger) => (
-                                <article className="charger-card" key={charger.id}>
+                                <article
+                                    className={`charger-card ${
+                                        focusedCharger?.id === charger.id ? "is-focused" : ""
+                                    }`}
+                                    key={charger.id}
+                                    onClick={() => showStation(charger.id)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                            event.preventDefault();
+                                            showStation(charger.id);
+                                        }
+                                    }}
+                                    role="button"
+                                    tabIndex={0}
+                                >
                                     <div className="card-header">
                                         <div>
                                             <div className="card-title-row">
@@ -1203,7 +1153,10 @@ export default function Home() {
                                         </div>
                                         <button
                                             className="remove-button"
-                                            onClick={() => removeCharger(charger.id)}
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                removeCharger(charger.id);
+                                            }}
                                             aria-label={`Remove ${charger.id}`}
                                         >
                                             ×
@@ -1277,10 +1230,6 @@ export default function Home() {
                 </section>
             </section>
 
-            <footer className="footer-note">
-                <span>VoltGrid / CSMS</span>
-                <span>Browser-generated OCPP traffic · For demonstration only</span>
-            </footer>
         </main>
     );
 }
