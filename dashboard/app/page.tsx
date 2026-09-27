@@ -757,19 +757,6 @@ export default function Home() {
     const focusedCharger =
         chargers.find((charger) => charger.id === focusedChargerId) ??
         chargers.at(-1);
-    const focusedChargerIndex = focusedCharger
-        ? chargers.findIndex((charger) => charger.id === focusedCharger.id)
-        : -1;
-    const focusedSessionEnergyKwh = focusedCharger
-        ? Math.max(
-              0,
-              (focusedCharger.meterWh -
-                  (focusedCharger.sessionStartWh ?? focusedCharger.meterWh)) /
-                  1000,
-          )
-        : 0;
-    const focusedSessionCostInr =
-        focusedSessionEnergyKwh * ((site?.tariffPaisePerKwh ?? 800) / 100);
     return (
         <main className="shell">
             <header className="topbar">
@@ -890,15 +877,34 @@ export default function Home() {
                         ) : null,
                     )}
 
-                    {focusedCharger && !focusedCharger.arriving ? (
+                    {chargers.map((focusedCharger, focusedChargerIndex) => {
+                        if (focusedCharger.arriving) {
+                            return null;
+                        }
+
+                        const focusedSessionEnergyKwh = Math.max(
+                            0,
+                            (focusedCharger.meterWh -
+                                (focusedCharger.sessionStartWh ?? focusedCharger.meterWh)) /
+                                1000,
+                        );
+                        const focusedSessionCostInr =
+                            focusedSessionEnergyKwh *
+                            ((site?.tariffPaisePerKwh ?? 800) / 100);
+
+                        return (
                         <aside
-                            className={`vehicle-stage-card stage-${focusedCharger.status.toLowerCase()}`}
+                            className={`vehicle-stage-card stage-${focusedCharger.status.toLowerCase()} ${
+                                focusedCharger.id === focusedChargerId ? "is-focused" : ""
+                            }`}
+                            key={focusedCharger.id}
                             style={
                                 {
                                     "--stage-left": `${12.5 + focusedChargerIndex * 25}%`,
                                 } as CSSProperties
                             }
                             aria-live="polite"
+                            onClick={() => showStation(focusedCharger.id)}
                         >
                             {focusedCharger.status === "Charging" ? (
                                 <>
@@ -1004,7 +1010,8 @@ export default function Home() {
                                 </>
                             )}
                         </aside>
-                    ) : null}
+                        );
+                    })}
 
                     <div className="station-event">
                         <span className={`status-dot ${backendOnline ? "is-online" : ""}`} />

@@ -813,8 +813,8 @@ input:focus-visible {
     position: absolute;
     z-index: 30;
     top: 24px;
-    left: clamp(120px, var(--stage-left), calc(100% - 120px));
-    width: 220px;
+    left: var(--stage-left);
+    width: min(210px, calc(25% - 10px));
     min-height: 132px;
     padding: 14px;
     transform: translateX(-50%);
@@ -824,6 +824,10 @@ input:focus-visible {
     box-shadow: 0 15px 34px rgba(31, 48, 38, 0.2);
     backdrop-filter: blur(10px);
     animation: stage-card-in 420ms ease-out both;
+}
+
+.vehicle-stage-card.is-focused {
+    border-color: var(--green);
 }
 
 .vehicle-stage-card::after {
@@ -1886,6 +1890,76 @@ body {
 
     .vehicle-stage-card {
         top: 14px;
+        width: calc(25% - 6px);
+        min-height: 108px;
+        padding: 8px;
+        border-radius: 10px;
+    }
+
+    .stage-card-heading {
+        gap: 5px;
+    }
+
+    .ready-mark,
+    .complete-mark,
+    .charging-indicator,
+    .stage-spinner {
+        width: 23px;
+        height: 23px;
+        border-radius: 7px;
+        font-size: 11px;
+    }
+
+    .stage-card-heading small,
+    .stage-stats small {
+        font-size: 5px;
+    }
+
+    .stage-card-heading strong {
+        font-size: 8px;
+    }
+
+    .charging-indicator::before {
+        width: 7px;
+        height: 12px;
+    }
+
+    .charging-indicator::after {
+        top: 9px;
+        left: 10px;
+    }
+
+    .charging-progress {
+        height: 5px;
+        margin: 7px 0 6px;
+    }
+
+    .stage-stats {
+        gap: 3px;
+    }
+
+    .stage-stats strong {
+        font-size: 7px;
+    }
+
+    .stage-summary {
+        display: grid;
+        gap: 2px;
+        margin: 6px 0;
+        font-size: 6px;
+    }
+
+    .stage-action {
+        min-height: 23px;
+        padding: 0 4px;
+        font-size: 6px;
+    }
+
+    .stage-message {
+        max-height: 26px;
+        margin: 5px 0;
+        overflow: hidden;
+        font-size: 6px;
     }
 
     .chargers-panel {
