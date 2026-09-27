@@ -1,0 +1,21 @@
+graph LR
+
+    subgraph inputs[Clients and Chargers]
+        direction TB
+        chargers[OCPP Chargers]
+        driver[Driver Web App]
+    end
+
+    csms[VoltGrid Hono CSMS]
+
+    subgraph outputs[Operator and Services]
+        direction TB
+        operator[Operator Web App]
+        allocator[Go Allocator]
+    end
+
+    chargers -->|Status meter and control| csms
+    driver -->|Sessions and invoices| csms
+    csms -->|Station and fault data| operator
+    csms -->|Power calculation request| allocator
+    allocator -->|Allocation result| csms

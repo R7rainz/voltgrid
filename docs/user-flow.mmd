@@ -1,0 +1,27 @@
+graph TB
+
+    subgraph connection[Connection]
+        direction LR
+        user[Operator or Driver]
+        setup[Configure Station]
+        connect[Connect Charger]
+        ready[Charger Ready]
+
+        user --> setup
+        setup --> connect
+        connect -->|OCPP| ready
+    end
+
+    subgraph charging[Charging and Billing]
+        direction RL
+        start[Start Session]
+        manage[Monitor and Balance Power]
+        stop[Stop Session]
+        invoice[Issue Invoice]
+
+        start -->|MeterValues| manage
+        manage --> stop
+        stop -->|StopTransaction| invoice
+    end
+
+    ready -->|StartTransaction| start
