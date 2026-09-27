@@ -81,11 +81,8 @@ input:focus-visible {
 
 .brand-icon,
 .sign-mark {
-    display: grid;
-    place-items: center;
-    color: white;
-    background: var(--forest);
-    font-weight: 900;
+    display: block;
+    object-fit: contain;
 }
 
 .brand-icon {

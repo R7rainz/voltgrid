@@ -797,7 +797,7 @@ export default function Home() {
         <main className="shell">
             <header className="topbar">
                 <div className="brand-mark" aria-label="VoltGrid">
-                    <span className="brand-icon">V</span>
+                    <img className="brand-icon" src="/icon.svg" alt="" />
                     <span>VoltGrid</span>
                 </div>
                 <div className="topbar-meta">
@@ -820,7 +820,7 @@ export default function Home() {
                     </div>
 
                     <div className="roadside-sign">
-                        <span className="sign-mark">V</span>
+                        <img className="sign-mark" src="/icon.svg" alt="" />
                         <div>
                             <strong>{site?.name ?? "VoltGrid Central"}</strong>
                             <small>EV charging · Open 24 hours</small>
