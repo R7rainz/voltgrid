@@ -1,6 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import {
+    type CSSProperties,
+    FormEvent,
+    useEffect,
+    useRef,
+    useState,
+} from "react";
 
 const CSMS_HTTP_URL =
     process.env.NEXT_PUBLIC_CSMS_HTTP_URL ?? "http://localhost:6773";
@@ -8,6 +14,7 @@ const CSMS_WS_URL =
     process.env.NEXT_PUBLIC_CSMS_WS_URL ?? "ws://localhost:6773";
 const DEFAULT_SITE_CAPACITY_KW = 100;
 const CHARGER_MAX_POWER_KW = 50;
+const CAR_COLORS = ["#2f6fed", "#e45d3f", "#25866f", "#7657c8"];
 
 type ChargerStatus =
     | "Offline"
@@ -85,6 +92,40 @@ function getProfileLimitKw(payload: unknown) {
     return isObject(firstPeriod) && typeof firstPeriod.limit === "number"
         ? Math.max(0, firstPeriod.limit / 1000)
         : 0;
+}
+
+function CarVisual({ color }: { color: string }) {
+    return (
+        <svg
+            className="car-visual"
+            viewBox="0 0 84 150"
+            role="img"
+            aria-label="Electric vehicle"
+        >
+            <ellipse cx="42" cy="140" rx="31" ry="7" fill="rgba(24, 35, 29, 0.2)" />
+            <rect x="3" y="34" width="8" height="29" rx="4" fill="#1f2729" />
+            <rect x="73" y="34" width="8" height="29" rx="4" fill="#1f2729" />
+            <rect x="3" y="91" width="8" height="29" rx="4" fill="#1f2729" />
+            <rect x="73" y="91" width="8" height="29" rx="4" fill="#1f2729" />
+            <path
+                d="M25 4h34c8 0 14 7 16 17l5 101c1 13-8 23-20 23H24c-12 0-21-10-20-23L9 21C11 11 17 4 25 4Z"
+                fill={color}
+                stroke="rgba(20, 30, 28, 0.3)"
+                strokeWidth="2"
+            />
+            <path d="M20 34c2-12 7-19 14-21h16c7 2 12 9 14 21l2 17H18l2-17Z" fill="#bfd7df" />
+            <path d="M19 92h46l-3 28c-1 7-6 11-12 12H34c-6-1-11-5-12-12l-3-28Z" fill="#9bb8c1" />
+            <rect x="19" y="56" width="46" height="31" rx="9" fill={color} opacity="0.84" />
+            <path d="M14 58h5v24h-7c-3 0-5-2-5-5V64c0-3 3-6 7-6Z" fill={color} />
+            <path d="M70 58h-5v24h7c3 0 5-2 5-5V64c0-3-3-6-7-6Z" fill={color} />
+            <rect x="15" y="16" width="12" height="5" rx="2.5" fill="#f8f4c8" />
+            <rect x="57" y="16" width="12" height="5" rx="2.5" fill="#f8f4c8" />
+            <rect x="15" y="126" width="12" height="5" rx="2.5" fill="#e95f58" />
+            <rect x="57" y="126" width="12" height="5" rx="2.5" fill="#e95f58" />
+            <circle cx="42" cy="73" r="7" fill="rgba(255, 255, 255, 0.2)" />
+            <path d="m38 64 10 8-7 2 4 8-11-10 7-2-3-6Z" fill="white" />
+        </svg>
+    );
 }
 
 export default function Home() {
@@ -594,7 +635,7 @@ export default function Home() {
             updateCharger(id, { arriving: false });
             setDemoStatus(`${id} parked · connecting charger cable`);
             void connectCharger(id).catch(() => undefined);
-        }, 1800);
+        }, 3000);
         arrivalTimers.current.set(id, timer);
 
         setChargerId(`demo-car-${String(nextChargers.length + 1).padStart(3, "0")}`);
@@ -689,9 +730,6 @@ export default function Home() {
             ? reportedAllocations.reduce((total, power) => total + power, 0)
             : Math.min(siteCapacityKw, projectedDemandKw);
     const headroomKw = Math.max(0, siteCapacityKw - allocatedPowerKw);
-    const capacityPercent = siteCapacityKw
-        ? Math.min(100, (allocatedPowerKw / siteCapacityKw) * 100)
-        : 0;
     const fairShareKw = chargingCount
         ? Math.min(CHARGER_MAX_POWER_KW, siteCapacityKw / chargingCount)
         : 0;
@@ -708,117 +746,152 @@ export default function Home() {
                         <span className="status-dot" />
                         CSMS {backendOnline ? "online" : "offline"}
                     </span>
-                    <span className="environment-label">DEMO CONTROL ROOM</span>
+                    <span className="environment-label">LIVE STATION DEMO</span>
                 </div>
             </header>
 
             <section className="station-experience">
                 <div className="station-intro">
-                    <p className="eyebrow">Live EV station simulation</p>
+                    <p className="eyebrow">VoltGrid · Live station</p>
                     <h1>
-                        Watch every arrival.
-                        <span>Control every charge.</span>
+                        A real charging stop.
+                        <span>Simulated end to end.</span>
                     </h1>
                     <p className="hero-text">
-                        Send a virtual EV from the road into a charging bay. VoltGrid
-                        connects it over OCPP, tracks energy in real time, and issues the
-                        final invoice using the station tariff.
+                        Bring an EV in from the street, park it under the solar canopy,
+                        connect the charger, and follow the complete session through to
+                        its final invoice.
                     </p>
                     <div className="hero-actions">
                         <a className="primary-button hero-button" href="#arrival">
-                            Bring in a vehicle <span>→</span>
+                            Add an arriving car <span>→</span>
                         </a>
-                        <span className="event-line">
-                            <span className={`status-dot ${backendOnline ? "is-online" : ""}`} />
-                            {demoStatus}
-                        </span>
+                    </div>
+                    <div className="station-quick-info">
+                        <div>
+                            <span>Today&apos;s tariff</span>
+                            <strong>
+                                ₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)}
+                                <small>/kWh</small>
+                            </strong>
+                        </div>
+                        <div>
+                            <span>Available power</span>
+                            <strong>{formatPower(headroomKw)}</strong>
+                        </div>
                     </div>
                 </div>
 
                 <div className="station-floor" aria-label="VoltGrid charging station">
-                    <div className="station-floor-header">
+                    <div className="station-landscape" aria-hidden="true">
+                        <span className="distant-building building-one" />
+                        <span className="distant-building building-two" />
+                        <span className="station-tree tree-one" />
+                        <span className="station-tree tree-two" />
+                    </div>
+
+                    <div className="roadside-sign">
+                        <span className="sign-mark">V</span>
                         <div>
-                            <span className="floor-label">VoltGrid urban charging hub</span>
-                            <strong>{site?.name ?? "SITE 01"}</strong>
-                        </div>
-                        <div className="floor-tariff">
-                            <span>Live tariff</span>
-                            <strong>₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)}</strong>
-                            <small>/ kWh</small>
+                            <strong>{site?.name ?? "VoltGrid Central"}</strong>
+                            <small>EV charging · Open 24 hours</small>
                         </div>
                     </div>
 
-                    <div className="station-canopy">
-                        <span>VOLTGRID</span>
-                        <small>{formatPower(siteCapacityKw)} site capacity</small>
+                    <div className="solar-canopy" aria-hidden="true">
+                        <div className="solar-panels">
+                            <i />
+                            <i />
+                            <i />
+                            <i />
+                        </div>
+                        <span className="canopy-brand">VOLTGRID</span>
                     </div>
 
-                    <div className="station-bays">
-                        {[0, 1, 2, 3].map((bayIndex) => {
-                            const charger = chargers[bayIndex];
-                            const isConnected =
-                                charger &&
-                                !charger.arriving &&
-                                charger.status !== "Offline" &&
-                                charger.status !== "Error";
+                    <div className="parking-area">
+                        <div className="station-bays">
+                            {[0, 1, 2, 3].map((bayIndex) => {
+                                const charger = chargers[bayIndex];
+                                const isConnected =
+                                    charger &&
+                                    !charger.arriving &&
+                                    charger.status !== "Offline" &&
+                                    charger.status !== "Error";
 
-                            return (
-                                <article
-                                    className={`station-bay ${charger ? "is-occupied" : ""}`}
-                                    key={bayIndex}
-                                >
-                                    <span className="bay-number">BAY {bayIndex + 1}</span>
-                                    <div
-                                        className={`charger-pedestal ${isConnected ? "is-online" : ""}`}
-                                        aria-hidden="true"
+                                return (
+                                    <article
+                                        className={`station-bay ${charger ? "is-occupied" : ""}`}
+                                        key={bayIndex}
                                     >
-                                        <span className="charger-screen">{isConnected ? "●" : "○"}</span>
-                                        <span className="charger-port" />
-                                    </div>
-                                    <span
-                                        className={`charger-cable ${isConnected ? "is-connected" : ""}`}
-                                        aria-hidden="true"
-                                    />
-
-                                    {charger ? (
+                                        <span className="bay-number">{bayIndex + 1}</span>
                                         <div
-                                            className={`scene-vehicle ${
-                                                charger.arriving ? "is-arriving" : "is-parked"
-                                            } status-${charger.status.toLowerCase()}`}
+                                            className={`charger-pedestal ${isConnected ? "is-online" : ""}`}
+                                            aria-hidden="true"
                                         >
-                                            <div className="vehicle-body" aria-hidden="true">
-                                                <span className="vehicle-windshield" />
-                                                <span className="vehicle-roof" />
-                                                <span className="vehicle-light left" />
-                                                <span className="vehicle-light right" />
+                                            <span className="charger-screen">
+                                                {isConnected ? "READY" : "IDLE"}
+                                            </span>
+                                            <span className="charger-port" />
+                                        </div>
+                                        <span
+                                            className={`charger-cable ${isConnected ? "is-connected" : ""}`}
+                                            aria-hidden="true"
+                                        />
+
+                                        {charger && !charger.arriving ? (
+                                            <div
+                                                className={`scene-vehicle status-${charger.status.toLowerCase()}`}
+                                            >
+                                                <CarVisual color={CAR_COLORS[bayIndex]} />
+                                                <strong>{charger.id}</strong>
+                                                <small>{charger.status}</small>
                                             </div>
-                                            <strong>{charger.id}</strong>
-                                            <small>
-                                                {charger.arriving ? "Approaching" : charger.status}
-                                            </small>
-                                        </div>
-                                    ) : (
-                                        <div className="empty-bay">
-                                            <span>+</span>
-                                            <small>Ready for arrival</small>
-                                        </div>
-                                    )}
-                                </article>
-                            );
-                        })}
+                                        ) : !charger ? (
+                                            <div className="empty-bay">
+                                                <span>EV</span>
+                                                <small>Available</small>
+                                            </div>
+                                        ) : null}
+                                    </article>
+                                );
+                            })}
+                        </div>
                     </div>
 
-                    <div className="station-road" aria-hidden="true">
-                        <span>EV ARRIVAL LANE</span>
-                        <i />
-                        <i />
-                        <i />
-                        <b>→</b>
+                    <div className="station-road">
+                        <span className="road-edge top" />
+                        <span className="road-mark mark-one" />
+                        <span className="road-mark mark-two" />
+                        <span className="road-mark mark-three" />
+                        <span className="road-arrow">→</span>
+                        <small>Station entrance</small>
+                    </div>
+
+                    {chargers.map((charger, bayIndex) =>
+                        charger.arriving ? (
+                            <div
+                                className="arrival-car"
+                                key={charger.id}
+                                style={
+                                    {
+                                        "--target-left": `${12.5 + bayIndex * 25}%`,
+                                    } as CSSProperties
+                                }
+                            >
+                                <CarVisual color={CAR_COLORS[bayIndex]} />
+                                <span>Arriving</span>
+                            </div>
+                        ) : null,
+                    )}
+
+                    <div className="station-event">
+                        <span className={`status-dot ${backendOnline ? "is-online" : ""}`} />
+                        <strong>{demoStatus}</strong>
                     </div>
 
                     <div className="station-floor-footer">
-                        <span>{chargers.length} / 4 bays occupied</span>
-                        <span>{formatPower(headroomKw)} grid headroom</span>
+                        <span>{chargers.length} of 4 bays occupied</span>
+                        <span>{formatPower(siteCapacityKw)} total capacity</span>
                     </div>
                 </div>
             </section>
