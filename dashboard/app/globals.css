@@ -320,7 +320,131 @@ input:focus-visible {
 
 @keyframes vehicle-settle { from { transform: translateX(5%) scale(0.96); opacity: 0.65; } }
 
-.hero-vehicle img { position: relative; z-index: 2; display: block; width: 100%; height: auto; }
+.cartoon-ev {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    aspect-ratio: 2.25 / 1;
+    filter: drop-shadow(0 24px 18px rgba(0, 0, 0, 0.5));
+}
+
+.ev-body {
+    position: absolute;
+    right: 2%;
+    bottom: 18%;
+    left: 2%;
+    height: 43%;
+    border: 3px solid #92ffd0;
+    border-radius: 34% 20% 16% 13% / 48% 55% 34% 32%;
+    background: linear-gradient(165deg, #54e69d 0%, #15976c 44%, #086149 100%);
+    box-shadow: inset 0 7px rgba(255, 255, 255, 0.2), inset 0 -9px rgba(0, 0, 0, 0.18), 0 0 30px rgba(44, 235, 151, 0.18);
+}
+
+.ev-body::before {
+    position: absolute;
+    right: 4%;
+    bottom: -10%;
+    left: 4%;
+    height: 18%;
+    content: "";
+    border-radius: 999px;
+    background: #09231e;
+}
+
+.ev-body::after {
+    position: absolute;
+    top: 12%;
+    right: 14%;
+    left: 12%;
+    height: 4%;
+    content: "";
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.38);
+}
+
+.ev-roof {
+    position: absolute;
+    z-index: 2;
+    top: 19%;
+    right: 22%;
+    left: 23%;
+    height: 37%;
+    overflow: hidden;
+    transform: skewX(-12deg);
+    border: 3px solid #92ffd0;
+    border-bottom: 0;
+    border-radius: 44% 49% 5% 5% / 80% 90% 8% 8%;
+    background: #132f35;
+}
+
+.ev-window {
+    position: absolute;
+    top: 15%;
+    bottom: 10%;
+    border-radius: 45% 18% 7% 6%;
+    background: linear-gradient(155deg, #8be9ef, #1a5965 72%);
+    box-shadow: inset 3px 3px rgba(255, 255, 255, 0.22);
+}
+
+.ev-window.rear { left: 8%; width: 39%; }
+.ev-window.front { right: 7%; width: 39%; transform: skewX(-7deg); }
+
+.ev-door {
+    position: absolute;
+    top: 18%;
+    bottom: 20%;
+    width: 26%;
+    border: 1px solid rgba(1, 45, 32, 0.42);
+    border-radius: 10px;
+}
+
+.ev-door.rear { left: 25%; }
+.ev-door.front { right: 22%; }
+
+.ev-headlight,
+.ev-tail-light {
+    position: absolute;
+    top: 31%;
+    width: 8%;
+    height: 10%;
+    border-radius: 999px;
+}
+
+.ev-headlight { right: 1%; background: #d7ffff; box-shadow: 8px 0 24px #7cfaff; }
+.ev-tail-light { left: 1%; background: #ff6b68; box-shadow: -5px 0 16px rgba(255, 107, 104, 0.75); }
+
+.ev-charge-door {
+    position: absolute;
+    top: 28%;
+    left: 9%;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    color: #06261b;
+    border: 2px solid rgba(6, 54, 38, 0.5);
+    border-radius: 50%;
+    background: var(--lime);
+    font-size: 10px;
+    font-style: normal;
+    font-weight: 900;
+}
+
+.ev-wheel {
+    position: absolute;
+    z-index: 4;
+    bottom: 7%;
+    width: 17%;
+    aspect-ratio: 1;
+    border: 8px solid #07100f;
+    border-radius: 50%;
+    background: repeating-conic-gradient(#789089 0 12deg, #243a36 12deg 24deg);
+    box-shadow: inset 0 0 0 5px #a7bbb5, 0 8px 13px rgba(0, 0, 0, 0.45);
+}
+
+.ev-wheel.rear { left: 16%; }
+.ev-wheel.front { right: 14%; }
+.ev-wheel i { position: absolute; inset: 34%; border-radius: 50%; background: #07100f; }
 
 .vehicle-aura {
     position: absolute;
@@ -687,7 +811,7 @@ input:focus-visible {
 @keyframes warning-pulse { to { border-color: rgba(255, 117, 111, 0.9); } }
 
 .empty-cinematic { position: absolute; z-index: 9; inset: 92px 35px 72px; display: grid; align-content: center; justify-items: center; text-align: center; }
-.empty-cinematic img { width: min(620px, 75%); margin-bottom: -7%; opacity: 0.32; filter: grayscale(0.4) drop-shadow(0 22px 30px rgba(0, 0, 0, 0.5)); }
+.empty-cinematic > .cartoon-ev { width: min(520px, 68%); margin-bottom: -2%; opacity: 0.38; filter: grayscale(0.25); }
 .empty-cinematic span { color: var(--green); font-size: 7px; font-weight: 900; letter-spacing: 0.2em; }
 .empty-cinematic h1 { max-width: 500px; margin: 8px 0; font-size: clamp(26px, 4vw, 46px); letter-spacing: -0.055em; line-height: 0.98; }
 .empty-cinematic p { max-width: 470px; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.6; }

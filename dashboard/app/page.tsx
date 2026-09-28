@@ -249,6 +249,26 @@ function getProfileLimitKw(payload: unknown) {
         : 0;
 }
 
+function CartoonEv() {
+    return (
+        <div className="cartoon-ev" role="img" aria-label="Cartoon electric vehicle">
+            <span className="ev-roof">
+                <i className="ev-window rear" />
+                <i className="ev-window front" />
+            </span>
+            <span className="ev-body">
+                <i className="ev-door rear" />
+                <i className="ev-door front" />
+                <i className="ev-headlight" />
+                <i className="ev-tail-light" />
+                <i className="ev-charge-door">⚡</i>
+            </span>
+            <span className="ev-wheel rear"><i /></span>
+            <span className="ev-wheel front"><i /></span>
+        </div>
+    );
+}
+
 export default function Home() {
     const [chargers, setChargers] = useState<SimulatedCharger[]>([]);
     const [backendOnline, setBackendOnline] = useState(false);
@@ -1137,7 +1157,7 @@ export default function Home() {
                                 }`}
                             >
                                 <div className="vehicle-aura" aria-hidden="true" />
-                                <img src="/voltgrid-ev.png" alt="Simulated graphite electric crossover" />
+                                <CartoonEv />
                                 <span className="vehicle-scan" aria-hidden="true" />
                                 <span className="charge-port-beacon" aria-hidden="true" />
                             </div>
@@ -1364,7 +1384,7 @@ export default function Home() {
                         </>
                     ) : (
                         <div className="empty-cinematic">
-                            <img src="/voltgrid-ev.png" alt="" />
+                            <CartoonEv />
                             <span>STATION READY</span>
                             <h1>Bring the first EV into the bay.</h1>
                             <p>Add a simulated vehicle to watch its charger connection, OCPP handshake, energy flow, and billing lifecycle.</p>
