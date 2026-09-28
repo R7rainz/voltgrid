@@ -26,6 +26,63 @@ type ChargerStatus =
     | "Charging"
     | "Error";
 
+type ProtocolStage =
+    | "arrival"
+    | "cable"
+    | "websocket"
+    | "boot"
+    | "status"
+    | "ready"
+    | "authorize"
+    | "meter"
+    | "stop"
+    | "invoice"
+    | "complete"
+    | "error";
+
+const OCPP_JOURNEY = [
+    ["Vehicle detected", "Driver and power request captured"],
+    ["WebSocket", "Persistent charger link opened"],
+    ["BootNotification", "Charger identity registered"],
+    ["StatusNotification", "Connector availability reported"],
+    ["StartTransaction", "Driver tag authorised"],
+    ["MeterValues", "Energy readings persisted"],
+    ["StopTransaction", "Session closed and invoiced"],
+] as const;
+
+const PROTOCOL_PROGRESS: Record<
+    ProtocolStage,
+    { active: number | null; doneThrough: number }
+> = {
+    arrival: { active: 0, doneThrough: -1 },
+    cable: { active: 0, doneThrough: -1 },
+    websocket: { active: 1, doneThrough: 0 },
+    boot: { active: 2, doneThrough: 1 },
+    status: { active: 3, doneThrough: 2 },
+    ready: { active: null, doneThrough: 3 },
+    authorize: { active: 4, doneThrough: 3 },
+    meter: { active: 5, doneThrough: 4 },
+    stop: { active: 6, doneThrough: 5 },
+    invoice: { active: 6, doneThrough: 5 },
+    complete: { active: null, doneThrough: 6 },
+    error: { active: null, doneThrough: -1 },
+};
+
+const CHARGER_SCREEN: Record<ProtocolStage, string> = {
+    arrival: "WAIT",
+    cable: "PLUG",
+    websocket: "LINK",
+    boot: "BOOT",
+    status: "SYNC",
+    ready: "READY",
+    authorize: "AUTH",
+    meter: "CHARGE",
+    stop: "STOP",
+    invoice: "BILL",
+    complete: "DONE",
+    error: "ERROR",
+};
+
 type Invoice = {
     id: number;
     sessionId: number;
@@ -44,6 +101,7 @@ type SimulatedCharger = {
     idTag: string;
     connectorId: number;
     requestedPowerKw: number;
+    protocolStage: ProtocolStage;
     status: ChargerStatus;
     meterWh: number;
     arriving: boolean;
@@ -79,6 +137,14 @@ function formatWh(meterWh: number) {
 function formatPower(powerKw: number) {
     return `${powerKw.toFixed(powerKw % 1 === 0 ? 0 : 1)} kW`;
 }
+
+function protocolMessage(stage: ProtocolStage) {
+    const step = OCPP_JOURNEY[PROTOCOL_PROGRESS[stage].active ?? 1];
+    return `${step[0]} · ${step[1]}`;
+}
+
+const wait = (milliseconds: number) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function getProfileLimitKw(payload: unknown) {
     if (!isObject(payload) || !isObject(payload.csChargingProfiles)) {
@@ -367,7 +433,11 @@ export default function Home() {
         }
 
         setDemoStatus(`Opening OCPP link · ${id}`);
-        updateCharger(id, { status: "Connecting", error: undefined });
+        updateCharger(id, {
+            status: "Connecting",
+            protocolStage: "websocket",
+            error: undefined,
+        });
 
         const socket = new WebSocket(
             `${CSMS_WS_URL}/ocpp/${encodeURIComponent(charger.id)}`,
@@ -380,7 +450,11 @@ export default function Home() {
             let settled = false;
 
             const fail = (error: Error) => {
-                updateCharger(id, { status: "Error", error: error.message });
+                updateCharger(id, {
+                    status: "Error",
+                    protocolStage: "error",
+                    error: error.message,
+                });
 
                 if (!settled) {
                     settled = true;
@@ -397,6 +471,13 @@ export default function Home() {
 
             socket.onopen = async () => {
                 try {
+                    setDemoStatus(`${id} WebSocket connected · persistent OCPP link ready`);
+                    await wait(650);
+
+                    updateCharger(id, { protocolStage: "boot" });
+                    setDemoStatus(`${id} → BootNotification · identifying charger`);
+                    await wait(650);
+
                     const bootResponse = await sendCall(id, "BootNotification", {
                         chargePointVendor: "VoltGrid Simulator",
                         chargePointModel: "Browser Charger",
@@ -406,14 +487,21 @@ export default function Home() {
                         throw new Error("BootNotification was rejected");
                     }
 
+                    updateCharger(id, { protocolStage: "status" });
+                    setDemoStatus(`${id} → StatusNotification · reporting connector`);
+                    await wait(650);
+
                     await sendCall(id, "StatusNotification", {
                         connectorId: charger.connectorId,
                         status: "Available",
                         errorCode: "NoError",
                     });
 
-                    updateCharger(id, { status: "Available" });
-                    setDemoStatus(`${id} online · connector available`);
+                    updateCharger(id, {
+                        status: "Available",
+                        protocolStage: "ready",
+                    });
+                    setDemoStatus(`${id} registered · connector available in CSMS`);
 
                     if (!settled) {
                         settled = true;
@@ -436,14 +524,21 @@ export default function Home() {
         }
 
         try {
-            setDemoStatus(`Authorising ${id} · starting session`);
-            updateCharger(id, { status: "Preparing", error: undefined });
+            setDemoStatus(`${id} → StatusNotification · vehicle preparing`);
+            updateCharger(id, {
+                status: "Preparing",
+                protocolStage: "authorize",
+                error: undefined,
+            });
 
             await sendCall(id, "StatusNotification", {
                 connectorId: charger.connectorId,
                 status: "Preparing",
                 errorCode: "NoError",
             });
+
+            setDemoStatus(`${id} → StartTransaction · authorising ${charger.idTag}`);
+            await wait(750);
 
             const response = await sendCall(id, "StartTransaction", {
                 connectorId: charger.connectorId,
@@ -480,6 +575,7 @@ export default function Home() {
 
             updateCharger(id, {
                 status: "Charging",
+                protocolStage: "meter",
                 transactionId: response.transactionId,
                 meterWh,
                 sessionStartWh: meterWh,
@@ -493,6 +589,7 @@ export default function Home() {
         } catch (error) {
             updateCharger(id, {
                 status: "Error",
+                protocolStage: "error",
                 error: error instanceof Error ? error.message : String(error),
             });
             setDemoStatus(`${id} session failed`);
@@ -550,6 +647,7 @@ export default function Home() {
         } catch (error) {
             updateCharger(id, {
                 status: "Error",
+                protocolStage: "error",
                 error: error instanceof Error ? error.message : String(error),
             });
         }
@@ -564,6 +662,8 @@ export default function Home() {
 
         try {
             setDemoStatus(`Closing ${id} · final meter and invoice`);
+            updateCharger(id, { protocolStage: "stop" });
+            await wait(650);
             const response = await sendCall(id, "StopTransaction", {
                 transactionId: charger.transactionId,
                 meterStop: charger.meterWh,
@@ -578,6 +678,9 @@ export default function Home() {
             ) {
                 throw new Error("StopTransaction was rejected");
             }
+
+            updateCharger(id, { protocolStage: "invoice" });
+            setDemoStatus(`${id} session accepted · generating invoice`);
 
             const invoiceResponse = await fetch(
                 `${CSMS_HTTP_URL}/api/sessions/${charger.transactionId}/invoice`,
@@ -600,11 +703,16 @@ export default function Home() {
                 errorCode: "NoError",
             });
 
-            updateCharger(id, { status: "Available", invoice: invoiceData.invoice });
+            updateCharger(id, {
+                status: "Available",
+                protocolStage: "complete",
+                invoice: invoiceData.invoice,
+            });
             setDemoStatus(`${id} complete · invoice issued`);
         } catch (error) {
             updateCharger(id, {
                 status: "Error",
+                protocolStage: "error",
                 error: error instanceof Error ? error.message : String(error),
             });
             setDemoStatus(`${id} session failed to close`);
@@ -638,6 +746,7 @@ export default function Home() {
         } catch (error) {
             updateCharger(id, {
                 status: "Error",
+                protocolStage: "error",
                 error: error instanceof Error ? error.message : String(error),
             });
             setDemoStatus(`${id} demo sequence failed`);
@@ -674,6 +783,7 @@ export default function Home() {
             idTag: tag,
             connectorId: connector,
             requestedPowerKw,
+            protocolStage: "arrival",
             status: "Offline",
             meterWh: 100_000,
             arriving: true,
@@ -685,10 +795,15 @@ export default function Home() {
         setFocusedChargerId(id);
         setDemoStatus(`${id} approaching · assigning bay ${nextChargers.length}`);
 
-        const timer = setTimeout(() => {
+        const timer = setTimeout(async () => {
             arrivalTimers.current.delete(id);
-            updateCharger(id, { arriving: false });
+            updateCharger(id, {
+                arriving: false,
+                status: "Connecting",
+                protocolStage: "cable",
+            });
             setDemoStatus(`${id} parked · connecting charger cable`);
+            await wait(900);
             void connectCharger(id).catch(() => undefined);
         }, 4800);
         arrivalTimers.current.set(id, timer);
@@ -707,7 +822,7 @@ export default function Home() {
 
         sockets.current.get(id)?.close();
         sockets.current.delete(id);
-        updateCharger(id, { status: "Offline" });
+        updateCharger(id, { status: "Offline", protocolStage: "websocket" });
         setDemoStatus(`${id} disconnected · site capacity released`);
     }
 
@@ -775,9 +890,6 @@ export default function Home() {
 
     const siteCapacityKw = site?.powerLimitKw ?? DEFAULT_SITE_CAPACITY_KW;
     const parkedChargers = chargers.filter((charger) => !charger.arriving);
-    const chargingCount = chargers.filter(
-        (charger) => charger.status === "Charging",
-    ).length;
     const projectedDemandKw = chargers
         .filter((charger) => charger.status === "Charging")
         .reduce((total, charger) => total + charger.requestedPowerKw, 0);
@@ -793,6 +905,9 @@ export default function Home() {
     const focusedCharger =
         chargers.find((charger) => charger.id === focusedChargerId) ??
         chargers.at(-1);
+    const focusedProtocol = focusedCharger
+        ? PROTOCOL_PROGRESS[focusedCharger.protocolStage]
+        : undefined;
     return (
         <main className="shell">
             <header className="topbar">
@@ -858,7 +973,9 @@ export default function Home() {
                                             aria-hidden="true"
                                         >
                                             <span className="charger-screen">
-                                                {isConnected ? "READY" : "IDLE"}
+                                                {charger
+                                                    ? CHARGER_SCREEN[charger.protocolStage]
+                                                    : "IDLE"}
                                             </span>
                                             <span className="charger-port" />
                                         </div>
@@ -1013,8 +1130,9 @@ export default function Home() {
                                         </div>
                                     </div>
                                     <div className="stage-summary">
-                                        <span>₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)} / kWh</span>
-                                        <span>Requests {formatPower(focusedCharger.requestedPowerKw)}</span>
+                                        <span>{focusedCharger.idTag}</span>
+                                        <span>Connector {focusedCharger.connectorId}</span>
+                                        <span>Needs {formatPower(focusedCharger.requestedPowerKw)}</span>
                                     </div>
                                     <button
                                         className="stage-action"
@@ -1038,7 +1156,9 @@ export default function Home() {
                                     </div>
                                     <p className="stage-message">
                                         {focusedCharger.error ??
-                                            "Establishing the OCPP connection…"}
+                                            protocolMessage(
+                                                focusedCharger.protocolStage,
+                                            )}
                                     </p>
                                     {focusedCharger.status === "Error" ||
                                     focusedCharger.status === "Offline" ? (
@@ -1185,6 +1305,54 @@ export default function Home() {
                             {parkedChargers.length} parked vehicle{parkedChargers.length === 1 ? "" : "s"}
                         </span>
                     </div>
+
+                    {focusedCharger && focusedProtocol ? (
+                        <aside className="protocol-monitor" aria-live="polite">
+                            <div className="protocol-monitor-header">
+                                <div>
+                                    <small>Live backend flow</small>
+                                    <strong>{focusedCharger.id}</strong>
+                                </div>
+                                <span>{CHARGER_SCREEN[focusedCharger.protocolStage]}</span>
+                            </div>
+                            <div className="vehicle-handshake">
+                                <span>
+                                    <small>Driver tag</small>
+                                    <strong>{focusedCharger.idTag}</strong>
+                                </span>
+                                <span>
+                                    <small>Connector</small>
+                                    <strong>{focusedCharger.connectorId}</strong>
+                                </span>
+                                <span>
+                                    <small>Power need</small>
+                                    <strong>{formatPower(focusedCharger.requestedPowerKw)}</strong>
+                                </span>
+                            </div>
+                            <ol className="protocol-steps">
+                                {OCPP_JOURNEY.map(([action, detail], index) => {
+                                    const done = index <= focusedProtocol.doneThrough;
+                                    const active = index === focusedProtocol.active;
+
+                                    return (
+                                        <li
+                                            className={`${done ? "is-done" : ""} ${
+                                                active ? "is-active" : ""
+                                            }`}
+                                            key={action}
+                                        >
+                                            <i>{done ? "✓" : index + 1}</i>
+                                            <span>
+                                                <strong>{action}</strong>
+                                                <small>{detail}</small>
+                                            </span>
+                                            {active ? <em>LIVE</em> : null}
+                                        </li>
+                                    );
+                                })}
+                            </ol>
+                        </aside>
+                    ) : null}
 
                     {parkedChargers.length === 0 ? (
                         <div className="empty-state">
