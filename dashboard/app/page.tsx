@@ -15,11 +15,17 @@ const CSMS_WS_URL =
     process.env.NEXT_PUBLIC_CSMS_WS_URL ?? "ws://localhost:6773";
 const DEFAULT_SITE_CAPACITY_KW = 100;
 const DEFAULT_CAR_POWER_KW = 50;
-const DEMO_BATTERY_KWH = 72;
-const DEMO_STARTING_SOC = 42;
+const CHARGE_OPTIONS_KWH = [10, 20, 40] as const;
+const VEHICLE_PROFILES = [
+    { model: "VX-1 Electric", batteryKwh: 72, rangeKm: 480, startingSoc: 42 },
+    { model: "City E-Cross", batteryKwh: 60, rangeKm: 390, startingSoc: 35 },
+    { model: "Touring EV", batteryKwh: 82, rangeKm: 520, startingSoc: 51 },
+    { model: "Urban Compact", batteryKwh: 48, rangeKm: 315, startingSoc: 28 },
+] as const;
 
 type ChargerStatus =
     | "Offline"
+    | "Parked"
     | "Connecting"
     | "Available"
     | "Preparing"
@@ -40,34 +46,6 @@ type ProtocolStage =
     | "complete"
     | "error";
 
-const OCPP_JOURNEY = [
-    ["Vehicle detected", "Driver and power request captured"],
-    ["WebSocket", "Persistent charger link opened"],
-    ["BootNotification", "Charger identity registered"],
-    ["StatusNotification", "Connector availability reported"],
-    ["StartTransaction", "Driver tag authorised"],
-    ["MeterValues", "Energy readings persisted"],
-    ["StopTransaction", "Session closed and invoiced"],
-] as const;
-
-const PROTOCOL_PROGRESS: Record<
-    ProtocolStage,
-    { active: number | null; doneThrough: number }
-> = {
-    arrival: { active: 0, doneThrough: -1 },
-    cable: { active: 0, doneThrough: -1 },
-    websocket: { active: 1, doneThrough: 0 },
-    boot: { active: 2, doneThrough: 1 },
-    status: { active: 3, doneThrough: 2 },
-    ready: { active: null, doneThrough: 3 },
-    authorize: { active: 4, doneThrough: 3 },
-    meter: { active: 5, doneThrough: 4 },
-    stop: { active: 6, doneThrough: 5 },
-    invoice: { active: 6, doneThrough: 5 },
-    complete: { active: null, doneThrough: 6 },
-    error: { active: null, doneThrough: -1 },
-};
-
 const CHARGER_SCREEN: Record<ProtocolStage, string> = {
     arrival: "WAIT",
     cable: "PLUG",
@@ -81,6 +59,72 @@ const CHARGER_SCREEN: Record<ProtocolStage, string> = {
     invoice: "BILL",
     complete: "DONE",
     error: "ERROR",
+};
+
+const TECH_STAGE_DETAILS: Record<
+    ProtocolStage,
+    { transport: string; message: string; csms: string }
+> = {
+    arrival: {
+        transport: "Simulator event",
+        message: "Vehicle profile and requested power captured",
+        csms: "No backend connection yet",
+    },
+    cable: {
+        transport: "Simulated physical connector",
+        message: "Cable lock and charging capability selected",
+        csms: "Waiting to open the charger socket",
+    },
+    websocket: {
+        transport: "HTTP Upgrade → persistent WebSocket",
+        message: "GET /ocpp/:chargerId · Upgrade: websocket",
+        csms: "Hono accepts the socket and maps it to the charger ID",
+    },
+    boot: {
+        transport: "OCPP JSON CALL",
+        message: "BootNotification · vendor and charger model",
+        csms: "Registers the charger and returns Accepted",
+    },
+    status: {
+        transport: "OCPP JSON CALL",
+        message: "StatusNotification · connector Available",
+        csms: "Updates connector state and last-seen time",
+    },
+    ready: {
+        transport: "Persistent WebSocket established",
+        message: "Charger registered and ready for a transaction",
+        csms: "Keeps the live charger session in memory",
+    },
+    authorize: {
+        transport: "OCPP JSON CALL",
+        message: "StartTransaction · idTag and meterStart",
+        csms: "Validates the request and creates a charging session",
+    },
+    meter: {
+        transport: "OCPP JSON CALL",
+        message: "MeterValues · cumulative imported energy in Wh",
+        csms: "Persists readings and updates live session telemetry",
+    },
+    stop: {
+        transport: "OCPP JSON CALL",
+        message: "StopTransaction · final meter and timestamp",
+        csms: "Closes the active session and calculates energy used",
+    },
+    invoice: {
+        transport: "Dashboard HTTP request",
+        message: "GET /api/sessions/:transactionId/invoice",
+        csms: "Applies the site tariff and issues the invoice",
+    },
+    complete: {
+        transport: "WebSocket remains available",
+        message: "Connector returns to Available",
+        csms: "Invoice delivered; mock payment is handled in the UI",
+    },
+    error: {
+        transport: "Connection interrupted",
+        message: "The active operation did not receive a valid response",
+        csms: "Preserves the last durable state for recovery",
+    },
 };
 
 type Invoice = {
@@ -99,6 +143,11 @@ type Invoice = {
 type SimulatedCharger = {
     id: string;
     idTag: string;
+    vehicleModel: string;
+    batteryKwh: number;
+    rangeKm: number;
+    startingSoc: number;
+    targetEnergyKwh: number;
     connectorId: number;
     requestedPowerKw: number;
     protocolStage: ProtocolStage;
@@ -108,6 +157,7 @@ type SimulatedCharger = {
     transactionId?: number;
     sessionStartWh?: number;
     invoice?: Invoice;
+    paymentStatus?: "Pending" | "Paid";
     allocatedPowerKw?: number;
     error?: string;
 };
@@ -138,11 +188,6 @@ function formatPower(powerKw: number) {
     return `${powerKw.toFixed(powerKw % 1 === 0 ? 0 : 1)} kW`;
 }
 
-function protocolMessage(stage: ProtocolStage) {
-    const step = OCPP_JOURNEY[PROTOCOL_PROGRESS[stage].active ?? 1];
-    return `${step[0]} · ${step[1]}`;
-}
-
 function routeProgress(stage: ProtocolStage) {
     if (stage === "cable") return 1;
     if (["websocket", "boot", "status", "ready", "authorize"].includes(stage)) return 2;
@@ -153,7 +198,9 @@ function routeProgress(stage: ProtocolStage) {
 function protocolPacket(charger: SimulatedCharger, suppliedPowerKw: number) {
     switch (charger.protocolStage) {
         case "cable":
-            return `Connector locked · EV requests ${formatPower(charger.requestedPowerKw)}`;
+            return charger.status === "Parked"
+                ? `Awaiting plan confirmation · EV requests ${formatPower(charger.requestedPowerKw)}`
+                : `Connector locked · EV requests ${formatPower(charger.requestedPowerKw)}`;
         case "websocket":
             return `GET /ocpp/${charger.id} · Upgrade: WebSocket`;
         case "boot":
@@ -169,9 +216,11 @@ function protocolPacket(charger: SimulatedCharger, suppliedPowerKw: number) {
         case "stop":
             return `CALL StopTransaction · meterStop=${charger.meterWh} Wh`;
         case "invoice":
-            return `POST /api/sessions/${charger.transactionId}/invoice`;
+            return `GET /api/sessions/${charger.transactionId}/invoice`;
         case "complete":
-            return `Invoice issued · ₹${charger.invoice?.amountInr ?? "0.00"}`;
+            return charger.paymentStatus === "Paid"
+                ? `Demo payment confirmed · ₹${charger.invoice?.amountInr ?? "0.00"}`
+                : `Invoice issued · ₹${charger.invoice?.amountInr ?? "0.00"}`;
         case "error":
             return charger.error ?? "OCPP connection failed";
         default:
@@ -531,6 +580,8 @@ export default function Home() {
                 status: "Preparing",
                 protocolStage: "authorize",
                 error: undefined,
+                invoice: undefined,
+                paymentStatus: undefined,
             });
 
             await sendCall(id, "StatusNotification", {
@@ -582,6 +633,7 @@ export default function Home() {
                 meterWh,
                 sessionStartWh: meterWh,
                 invoice: undefined,
+                paymentStatus: undefined,
             });
             setDemoStatus(
                 transactionStatus === "ConcurrentTx"
@@ -598,7 +650,7 @@ export default function Home() {
         }
     }
 
-    async function addEnergy(id: string) {
+    async function addEnergy(id: string, requestedWh = 1000) {
         const charger = chargersRef.current.find((item) => item.id === id);
 
         if (!charger?.transactionId || charger.status !== "Charging") {
@@ -618,7 +670,9 @@ export default function Home() {
 
         const addedWh = Math.max(
             1,
-            Math.round((1000 * suppliedPowerKw) / charger.requestedPowerKw),
+            Math.round(
+                (requestedWh * suppliedPowerKw) / charger.requestedPowerKw,
+            ),
         );
         const meterWh = charger.meterWh + addedWh;
 
@@ -710,6 +764,7 @@ export default function Home() {
                 status: "Available",
                 protocolStage: "complete",
                 invoice: invoiceData.invoice,
+                paymentStatus: "Pending",
             });
             setDemoStatus(`${id} complete · invoice issued`);
         } catch (error) {
@@ -722,13 +777,40 @@ export default function Home() {
         }
     }
 
+    async function beginConnection(id: string) {
+        const charger = chargersRef.current.find((item) => item.id === id);
+
+        if (!charger || charger.arriving) {
+            return;
+        }
+
+        updateCharger(id, {
+            status: "Connecting",
+            protocolStage: "cable",
+            error: undefined,
+        });
+        setDemoStatus(`${id} · locking the physical charging connector`);
+        await wait(1_100);
+        await connectCharger(id);
+    }
+
+    function selectChargePlan(id: string, targetEnergyKwh: number) {
+        updateCharger(id, { targetEnergyKwh });
+        setDemoStatus(`${id} · ${targetEnergyKwh} kWh charging plan selected`);
+    }
+
+    function confirmMockPayment(id: string) {
+        updateCharger(id, { paymentStatus: "Paid" });
+        setDemoStatus(`${id} · demo payment confirmed`);
+    }
+
     async function runDemo(id: string) {
         try {
             showStation(id);
             setDemoStatus(`Vehicle arrival sequence · ${id}`);
 
             if (sockets.current.get(id)?.readyState !== WebSocket.OPEN) {
-                await connectCharger(id);
+                await beginConnection(id);
             }
 
             await startSession(id);
@@ -739,8 +821,16 @@ export default function Home() {
 
             await new Promise((resolve) => setTimeout(resolve, 1_100));
 
+            const selectedEnergyWh = Math.max(
+                1,
+                Math.round(
+                    (chargersRef.current.find((charger) => charger.id === id)
+                        ?.targetEnergyKwh ?? 20) * 250,
+                ),
+            );
+
             for (let reading = 0; reading < 4; reading += 1) {
-                await addEnergy(id);
+                await addEnergy(id, selectedEnergyWh);
                 await new Promise((resolve) => setTimeout(resolve, 1_300));
             }
 
@@ -781,9 +871,16 @@ export default function Home() {
             return;
         }
 
+        const vehicleProfile =
+            VEHICLE_PROFILES[chargersRef.current.length % VEHICLE_PROFILES.length];
         const nextCharger: SimulatedCharger = {
             id,
             idTag: tag,
+            vehicleModel: vehicleProfile.model,
+            batteryKwh: vehicleProfile.batteryKwh,
+            rangeKm: vehicleProfile.rangeKm,
+            startingSoc: vehicleProfile.startingSoc,
+            targetEnergyKwh: 20,
             connectorId: connector,
             requestedPowerKw,
             protocolStage: "arrival",
@@ -798,16 +895,14 @@ export default function Home() {
         setFocusedChargerId(id);
         setDemoStatus(`${id} approaching · assigning bay ${nextChargers.length}`);
 
-        const timer = setTimeout(async () => {
+        const timer = setTimeout(() => {
             arrivalTimers.current.delete(id);
             updateCharger(id, {
                 arriving: false,
-                status: "Connecting",
+                status: "Parked",
                 protocolStage: "cable",
             });
-            setDemoStatus(`${id} parked · connecting charger cable`);
-            await wait(850);
-            void connectCharger(id).catch(() => undefined);
+            setDemoStatus(`${id} parked · choose a charging plan`);
         }, 4200);
         arrivalTimers.current.set(id, timer);
 
@@ -924,17 +1019,46 @@ export default function Home() {
         ((site?.tariffPaisePerKwh ?? 800) / 100);
     const focusedSoc = Math.min(
         100,
-        DEMO_STARTING_SOC +
-            (focusedSessionEnergyKwh / DEMO_BATTERY_KWH) * 100,
+        (focusedCharger?.startingSoc ?? 0) +
+            (focusedSessionEnergyKwh /
+                (focusedCharger?.batteryKwh ?? 1)) *
+                100,
     );
+    const selectedPlanMinutes = focusedCharger
+        ? Math.ceil(
+              (focusedCharger.targetEnergyKwh /
+                  Math.max(1, focusedCharger.requestedPowerKw)) *
+                  60,
+          )
+        : 0;
+    const selectedPlanCostInr = focusedCharger
+        ? focusedCharger.targetEnergyKwh *
+          ((site?.tariffPaisePerKwh ?? 800) / 100)
+        : 0;
     const focusedRouteProgress = focusedCharger
         ? routeProgress(focusedCharger.protocolStage)
         : 0;
+    const focusedCableConnecting = Boolean(
+        focusedCharger &&
+            focusedCharger.status === "Connecting" &&
+            focusedCharger.protocolStage === "cable",
+    );
     const focusedConnected = Boolean(
         focusedCharger &&
             !focusedCharger.arriving &&
-            !["Offline", "Error"].includes(focusedCharger.status),
+            !["Offline", "Parked", "Error"].includes(focusedCharger.status) &&
+            focusedCharger.protocolStage !== "cable",
     );
+    const stageDetails =
+        focusedCharger?.status === "Parked"
+            ? {
+                  transport: "No connection opened yet",
+                  message: "Driver reviews tariff and selects an energy target",
+                  csms: "Waiting for plan confirmation before WebSocket upgrade",
+              }
+            : focusedCharger
+              ? TECH_STAGE_DETAILS[focusedCharger.protocolStage]
+              : TECH_STAGE_DETAILS.arrival;
     return (
         <main className="shell">
             <header className="topbar">
@@ -996,8 +1120,14 @@ export default function Home() {
                     {focusedCharger ? (
                         <>
                             <div className="scene-identity">
-                                <span>{focusedCharger.arriving ? "VEHICLE INBOUND" : "VEHICLE LINKED"}</span>
-                                <h1>VX-1 Electric</h1>
+                                <span>
+                                    {focusedCharger.arriving
+                                        ? "VEHICLE INBOUND"
+                                        : focusedCharger.status === "Parked"
+                                          ? "PARKED · AWAITING PLAN"
+                                          : "VEHICLE LINKED"}
+                                </span>
+                                <h1>{focusedCharger.vehicleModel}</h1>
                                 <p>{focusedCharger.id} · {focusedCharger.idTag}</p>
                             </div>
 
@@ -1014,14 +1144,24 @@ export default function Home() {
 
                             <div
                                 className={`charger-tower ${
-                                    focusedConnected ? "is-linked" : ""
+                                    focusedConnected || focusedCableConnecting
+                                        ? "is-linked"
+                                        : ""
                                 }`}
-                                aria-label={`Charger ${CHARGER_SCREEN[focusedCharger.protocolStage]}`}
+                                aria-label={`Charger ${
+                                    focusedCharger.status === "Parked"
+                                        ? "awaiting plan selection"
+                                        : CHARGER_SCREEN[focusedCharger.protocolStage]
+                                }`}
                             >
                                 <span className="tower-light" />
                                 <div className="tower-display">
                                     <small>VOLTGRID</small>
-                                    <strong>{CHARGER_SCREEN[focusedCharger.protocolStage]}</strong>
+                                    <strong>
+                                        {focusedCharger.status === "Parked"
+                                            ? "SELECT"
+                                            : CHARGER_SCREEN[focusedCharger.protocolStage]}
+                                    </strong>
                                     <i>{focusedPowerKw.toFixed(1)} kW</i>
                                 </div>
                                 <span className="tower-port" />
@@ -1029,13 +1169,16 @@ export default function Home() {
                             </div>
 
                             <svg
-                                className={`energy-cable ${focusedConnected ? "is-live" : ""}`}
+                                className={`energy-cable ${
+                                    focusedCableConnecting ? "is-plugging" : ""
+                                } ${focusedConnected ? "is-live" : ""}`}
                                 viewBox="0 0 1000 560"
                                 preserveAspectRatio="none"
                                 aria-hidden="true"
                             >
                                 <path d="M148 319 C 190 405, 316 431, 445 338" />
                                 <path className="energy-flow" d="M148 319 C 190 405, 316 431, 445 338" />
+                                <circle className="connector-head" cx="445" cy="338" r="9" />
                             </svg>
 
                             <aside className="vehicle-telemetry" aria-label="Simulated vehicle telemetry">
@@ -1049,7 +1192,7 @@ export default function Home() {
                                 <div className="telemetry-grid">
                                     <span>
                                         <small>Battery</small>
-                                        <strong>{DEMO_BATTERY_KWH} kWh</strong>
+                                        <strong>{focusedCharger.batteryKwh} kWh</strong>
                                     </span>
                                     <span>
                                         <small>Requested</small>
@@ -1062,38 +1205,109 @@ export default function Home() {
                                         </strong>
                                     </span>
                                     <span>
-                                        <small>Session</small>
-                                        <strong>{focusedSessionEnergyKwh.toFixed(1)} kWh</strong>
+                                        <small>Range</small>
+                                        <strong>{focusedCharger.rangeKm} km</strong>
                                     </span>
                                 </div>
                             </aside>
 
-                            <aside className="session-console" aria-live="polite">
-                                <div className="console-heading">
-                                    <span className={`charger-status-dot status-${focusedCharger.status.toLowerCase()}`} />
-                                    <div>
-                                        <small>Session state</small>
-                                        <strong>{focusedCharger.status}</strong>
+                            {focusedCharger.status === "Parked" ? (
+                                <aside className="charge-offer-card" aria-live="polite">
+                                    <div className="offer-heading">
+                                        <span>CHARGING OFFER</span>
+                                        <strong>Choose your top-up</strong>
+                                        <small>Simulator profile · not vehicle-supplied OCPP data</small>
                                     </div>
-                                </div>
-                                <dl>
-                                    <div><dt>Connector</dt><dd>{focusedCharger.connectorId}</dd></div>
-                                    <div><dt>Transaction</dt><dd>{focusedCharger.transactionId ?? "—"}</dd></div>
-                                    <div><dt>Tariff</dt><dd>₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)}/kWh</dd></div>
-                                    <div><dt>Live cost</dt><dd>₹{focusedSessionCostInr.toFixed(2)}</dd></div>
-                                </dl>
-                                {focusedCharger.invoice ? (
-                                    <div className="console-invoice">
-                                        <span>Invoice issued</span>
-                                        <strong>₹{focusedCharger.invoice.amountInr}</strong>
+                                    <div className="offer-vehicle">
+                                        <span>
+                                            <small>Vehicle</small>
+                                            <strong>{focusedCharger.vehicleModel}</strong>
+                                        </span>
+                                        <span>
+                                            <small>Battery / SOC</small>
+                                            <strong>{focusedCharger.batteryKwh} kWh · {focusedCharger.startingSoc}%</strong>
+                                        </span>
+                                        <span>
+                                            <small>Max request</small>
+                                            <strong>{formatPower(focusedCharger.requestedPowerKw)}</strong>
+                                        </span>
                                     </div>
-                                ) : null}
-                            </aside>
+                                    <div className="plan-options" aria-label="Select energy amount">
+                                        {CHARGE_OPTIONS_KWH.map((energyKwh) => (
+                                            <button
+                                                className={focusedCharger.targetEnergyKwh === energyKwh ? "is-selected" : ""}
+                                                key={energyKwh}
+                                                onClick={() => selectChargePlan(focusedCharger.id, energyKwh)}
+                                            >
+                                                <strong>{energyKwh} kWh</strong>
+                                                <small>₹{(energyKwh * ((site?.tariffPaisePerKwh ?? 800) / 100)).toFixed(0)}</small>
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="offer-summary">
+                                        <span><small>Tariff</small><strong>₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)}/kWh</strong></span>
+                                        <span><small>Est. time</small><strong>≈ {selectedPlanMinutes} min</strong></span>
+                                        <span><small>Est. total</small><strong>₹{selectedPlanCostInr.toFixed(2)}</strong></span>
+                                    </div>
+                                    <button
+                                        className="connect-offer-button"
+                                        onClick={() => void beginConnection(focusedCharger.id)}
+                                        disabled={!backendOnline}
+                                    >
+                                        Confirm plan and connect charger <span>→</span>
+                                    </button>
+                                </aside>
+                            ) : focusedCharger.invoice ? (
+                                <aside className={`payment-panel payment-${focusedCharger.paymentStatus?.toLowerCase() ?? "pending"}`} aria-live="polite">
+                                    {focusedCharger.paymentStatus === "Paid" ? (
+                                        <div className="payment-success">
+                                            <span>✓</span>
+                                            <small>DEMO PAYMENT CONFIRMED</small>
+                                            <strong>₹{focusedCharger.invoice.amountInr}</strong>
+                                            <p>Session {focusedCharger.transactionId} is complete.</p>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="payment-heading">
+                                                <div><small>SESSION COMPLETE</small><strong>Pay invoice</strong></div>
+                                                <strong>₹{focusedCharger.invoice.amountInr}</strong>
+                                            </div>
+                                            <div className="payment-body">
+                                                <div className="mock-qr" aria-label="Mock payment QR code">
+                                                    <i className="finder finder-one" />
+                                                    <i className="finder finder-two" />
+                                                    <i className="finder finder-three" />
+                                                    <b>VG</b>
+                                                </div>
+                                                <div>
+                                                    <span>{focusedCharger.invoice.energyKwh.toFixed(1)} kWh delivered</span>
+                                                    <span>UPI QR · demonstration only</span>
+                                                    <button onClick={() => confirmMockPayment(focusedCharger.id)}>Simulate payment</button>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+                                </aside>
+                            ) : (
+                                <aside className="session-console" aria-live="polite">
+                                    <div className="console-heading">
+                                        <span className={`charger-status-dot status-${focusedCharger.status.toLowerCase()}`} />
+                                        <div><small>Session state</small><strong>{focusedCharger.status}</strong></div>
+                                    </div>
+                                    <dl>
+                                        <div><dt>Connector</dt><dd>{focusedCharger.connectorId}</dd></div>
+                                        <div><dt>Transaction</dt><dd>{focusedCharger.transactionId ?? "—"}</dd></div>
+                                        <div><dt>Energy</dt><dd>{focusedSessionEnergyKwh.toFixed(1)} kWh</dd></div>
+                                        <div><dt>Tariff</dt><dd>₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)}/kWh</dd></div>
+                                        <div><dt>Live cost</dt><dd>₹{focusedSessionCostInr.toFixed(2)}</dd></div>
+                                    </dl>
+                                </aside>
+                            )}
 
                             <section className="protocol-tunnel" aria-label="Live OCPP backend route">
                                 <div className="tunnel-heading">
-                                    <span><i /> LIVE OCPP SIGNAL</span>
-                                    <strong>{protocolMessage(focusedCharger.protocolStage)}</strong>
+                                    <span><i /> LIVE BACKEND TRACE</span>
+                                    <strong>{stageDetails.message}</strong>
                                 </div>
                                 <div className="tunnel-route">
                                     {[
@@ -1111,6 +1325,11 @@ export default function Home() {
                                         </div>
                                     ))}
                                 </div>
+                                <div className="tech-detail-strip">
+                                    <span><small>TRANSPORT</small><strong>{stageDetails.transport}</strong></span>
+                                    <span><small>MESSAGE</small><strong>{stageDetails.message}</strong></span>
+                                    <span><small>CSMS RESPONSIBILITY</small><strong>{stageDetails.csms}</strong></span>
+                                </div>
                                 <div className="packet-readout">
                                     <span>PACKET</span>
                                     <code>{protocolPacket(focusedCharger, focusedPowerKw)}</code>
@@ -1123,18 +1342,24 @@ export default function Home() {
                                     <span className={`status-dot ${backendOnline ? "is-online" : ""}`} />
                                     <p>{focusedCharger.error ?? demoStatus}</p>
                                 </div>
-                                <button
-                                    className="cinematic-button"
-                                    onClick={() => void runDemo(focusedCharger.id)}
-                                    disabled={focusedCharger.arriving || focusedCharger.status === "Connecting" || focusedCharger.status === "Charging"}
-                                >
-                                    {focusedCharger.status === "Error" || focusedCharger.status === "Offline"
-                                        ? "Retry connection"
-                                        : focusedCharger.invoice
-                                          ? "Run another session"
-                                          : "Run full charging demo"}
-                                    <span>→</span>
-                                </button>
+                                {focusedCharger.status !== "Parked" &&
+                                !(
+                                    focusedCharger.invoice &&
+                                    focusedCharger.paymentStatus !== "Paid"
+                                ) ? (
+                                    <button
+                                        className="cinematic-button"
+                                        onClick={() => void runDemo(focusedCharger.id)}
+                                        disabled={focusedCharger.arriving || focusedCharger.status === "Connecting" || focusedCharger.status === "Charging"}
+                                    >
+                                        {focusedCharger.status === "Error" || focusedCharger.status === "Offline"
+                                            ? "Retry connection"
+                                            : focusedCharger.invoice
+                                              ? "Run another session"
+                                              : "Run full charging demo"}
+                                        <span>→</span>
+                                    </button>
+                                ) : null}
                             </div>
                         </>
                     ) : (
@@ -1155,11 +1380,21 @@ export default function Home() {
                                     className={charger.id === focusedCharger?.id ? "is-active" : ""}
                                     onClick={() => showStation(charger.id)}
                                 >
-                                    <i className={`status-${charger.status.toLowerCase()}`} />
-                                    <span><small>Bay {bayIndex + 1}</small><strong>{charger.id}</strong></span>
+                                    <span className="mini-bay-visual" aria-hidden="true">
+                                        <i className="mini-charger" />
+                                        <i className={`mini-car status-${charger.status.toLowerCase()}`} />
+                                        <i className="mini-bay-line" />
+                                    </span>
+                                    <span className="mini-bay-copy">
+                                        <small>Bay {bayIndex + 1} · {charger.status}</small>
+                                        <strong>{charger.id}</strong>
+                                    </span>
                                 </button>
                             ) : (
-                                <span className="empty-slot" key={bayIndex}>Bay {bayIndex + 1} · Open</span>
+                                <span className="empty-slot" key={bayIndex}>
+                                    <i className="empty-bay-outline" />
+                                    Bay {bayIndex + 1} · Open
+                                </span>
                             );
                         })}
                     </nav>
@@ -1371,7 +1606,7 @@ export default function Home() {
                                     <div className="card-actions">
                                         <button
                                             className="secondary-button"
-                                            onClick={() => void connectCharger(charger.id).catch(() => undefined)}
+                                            onClick={() => void beginConnection(charger.id).catch(() => undefined)}
                                             disabled={charger.status === "Connecting" || charger.status === "Charging" || charger.status === "Available"}
                                         >
                                             Connect
