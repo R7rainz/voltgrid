@@ -1,7 +1,6 @@
 "use client";
 
 import {
-    type CSSProperties,
     FormEvent,
     useEffect,
     useRef,
@@ -16,7 +15,8 @@ const CSMS_WS_URL =
     process.env.NEXT_PUBLIC_CSMS_WS_URL ?? "ws://localhost:6773";
 const DEFAULT_SITE_CAPACITY_KW = 100;
 const DEFAULT_CAR_POWER_KW = 50;
-const CAR_COLORS = ["#2f6fed", "#e45d3f", "#25866f", "#7657c8"];
+const DEMO_BATTERY_KWH = 72;
+const DEMO_STARTING_SOC = 42;
 
 type ChargerStatus =
     | "Offline"
@@ -145,7 +145,7 @@ function protocolMessage(stage: ProtocolStage) {
 
 function routeProgress(stage: ProtocolStage) {
     if (stage === "cable") return 1;
-    if (["websocket", "boot", "status", "authorize"].includes(stage)) return 2;
+    if (["websocket", "boot", "status", "ready", "authorize"].includes(stage)) return 2;
     if (["meter", "stop", "invoice", "complete"].includes(stage)) return 3;
     return 0;
 }
@@ -198,40 +198,6 @@ function getProfileLimitKw(payload: unknown) {
     return isObject(firstPeriod) && typeof firstPeriod.limit === "number"
         ? Math.max(0, firstPeriod.limit / 1000)
         : 0;
-}
-
-function CarVisual({ color }: { color: string }) {
-    return (
-        <svg
-            className="car-visual"
-            viewBox="0 0 84 150"
-            role="img"
-            aria-label="Electric vehicle"
-        >
-            <ellipse cx="42" cy="140" rx="31" ry="7" fill="rgba(24, 35, 29, 0.2)" />
-            <rect x="3" y="34" width="8" height="29" rx="4" fill="#1f2729" />
-            <rect x="73" y="34" width="8" height="29" rx="4" fill="#1f2729" />
-            <rect x="3" y="91" width="8" height="29" rx="4" fill="#1f2729" />
-            <rect x="73" y="91" width="8" height="29" rx="4" fill="#1f2729" />
-            <path
-                d="M25 4h34c8 0 14 7 16 17l5 101c1 13-8 23-20 23H24c-12 0-21-10-20-23L9 21C11 11 17 4 25 4Z"
-                fill={color}
-                stroke="rgba(20, 30, 28, 0.3)"
-                strokeWidth="2"
-            />
-            <path d="M20 34c2-12 7-19 14-21h16c7 2 12 9 14 21l2 17H18l2-17Z" fill="#bfd7df" />
-            <path d="M19 92h46l-3 28c-1 7-6 11-12 12H34c-6-1-11-5-12-12l-3-28Z" fill="#9bb8c1" />
-            <rect x="19" y="56" width="46" height="31" rx="9" fill={color} opacity="0.84" />
-            <path d="M14 58h5v24h-7c-3 0-5-2-5-5V64c0-3 3-6 7-6Z" fill={color} />
-            <path d="M70 58h-5v24h7c3 0 5-2 5-5V64c0-3-3-6-7-6Z" fill={color} />
-            <rect x="15" y="16" width="12" height="5" rx="2.5" fill="#f8f4c8" />
-            <rect x="57" y="16" width="12" height="5" rx="2.5" fill="#f8f4c8" />
-            <rect x="15" y="126" width="12" height="5" rx="2.5" fill="#e95f58" />
-            <rect x="57" y="126" width="12" height="5" rx="2.5" fill="#e95f58" />
-            <circle cx="42" cy="73" r="7" fill="rgba(255, 255, 255, 0.2)" />
-            <path d="m38 64 10 8-7 2 4 8-11-10 7-2-3-6Z" fill="white" />
-        </svg>
-    );
 }
 
 export default function Home() {
@@ -508,11 +474,11 @@ export default function Home() {
             socket.onopen = async () => {
                 try {
                     setDemoStatus(`${id} WebSocket connected · persistent OCPP link ready`);
-                    await wait(650);
+                    await wait(850);
 
                     updateCharger(id, { protocolStage: "boot" });
                     setDemoStatus(`${id} → BootNotification · identifying charger`);
-                    await wait(650);
+                    await wait(850);
 
                     const bootResponse = await sendCall(id, "BootNotification", {
                         chargePointVendor: "VoltGrid Simulator",
@@ -525,7 +491,7 @@ export default function Home() {
 
                     updateCharger(id, { protocolStage: "status" });
                     setDemoStatus(`${id} → StatusNotification · reporting connector`);
-                    await wait(650);
+                    await wait(850);
 
                     await sendCall(id, "StatusNotification", {
                         connectorId: charger.connectorId,
@@ -574,7 +540,7 @@ export default function Home() {
             });
 
             setDemoStatus(`${id} → StartTransaction · authorising ${charger.idTag}`);
-            await wait(750);
+            await wait(900);
 
             const response = await sendCall(id, "StartTransaction", {
                 connectorId: charger.connectorId,
@@ -699,7 +665,7 @@ export default function Home() {
         try {
             setDemoStatus(`Closing ${id} · final meter and invoice`);
             updateCharger(id, { protocolStage: "stop" });
-            await wait(650);
+            await wait(850);
             const response = await sendCall(id, "StopTransaction", {
                 transactionId: charger.transactionId,
                 meterStop: charger.meterWh,
@@ -717,7 +683,7 @@ export default function Home() {
 
             updateCharger(id, { protocolStage: "invoice" });
             setDemoStatus(`${id} session accepted · generating invoice`);
-            await wait(650);
+            await wait(850);
 
             const invoiceResponse = await fetch(
                 `${CSMS_HTTP_URL}/api/sessions/${charger.transactionId}/invoice`,
@@ -771,14 +737,14 @@ export default function Home() {
                 return;
             }
 
-            await new Promise((resolve) => setTimeout(resolve, 1_200));
+            await new Promise((resolve) => setTimeout(resolve, 1_100));
 
             for (let reading = 0; reading < 4; reading += 1) {
                 await addEnergy(id);
-                await new Promise((resolve) => setTimeout(resolve, 1_200));
+                await new Promise((resolve) => setTimeout(resolve, 1_300));
             }
 
-            await new Promise((resolve) => setTimeout(resolve, 800));
+            await new Promise((resolve) => setTimeout(resolve, 700));
             await stopSession(id);
         } catch (error) {
             updateCharger(id, {
@@ -840,9 +806,9 @@ export default function Home() {
                 protocolStage: "cable",
             });
             setDemoStatus(`${id} parked · connecting charger cable`);
-            await wait(900);
+            await wait(850);
             void connectCharger(id).catch(() => undefined);
-        }, 4800);
+        }, 4200);
         arrivalTimers.current.set(id, timer);
 
         setChargerId(`demo-car-${String(nextChargers.length + 1).padStart(3, "0")}`);
@@ -945,10 +911,30 @@ export default function Home() {
     const focusedPowerKw = focusedCharger
         ? baselinePowerById.get(focusedCharger.id) ?? 0
         : 0;
-    const showConnectionCinematic =
+    const focusedSessionEnergyKwh = focusedCharger
+        ? Math.max(
+              0,
+              (focusedCharger.meterWh -
+                  (focusedCharger.sessionStartWh ?? focusedCharger.meterWh)) /
+                  1000,
+          )
+        : 0;
+    const focusedSessionCostInr =
+        focusedSessionEnergyKwh *
+        ((site?.tariffPaisePerKwh ?? 800) / 100);
+    const focusedSoc = Math.min(
+        100,
+        DEMO_STARTING_SOC +
+            (focusedSessionEnergyKwh / DEMO_BATTERY_KWH) * 100,
+    );
+    const focusedRouteProgress = focusedCharger
+        ? routeProgress(focusedCharger.protocolStage)
+        : 0;
+    const focusedConnected = Boolean(
         focusedCharger &&
-        !focusedCharger.arriving &&
-        !["ready", "complete"].includes(focusedCharger.protocolStage);
+            !focusedCharger.arriving &&
+            !["Offline", "Error"].includes(focusedCharger.status),
+    );
     return (
         <main className="shell">
             <header className="topbar">
@@ -967,343 +953,223 @@ export default function Home() {
             </header>
 
             <section className="station-experience">
-                <div className="station-floor" aria-label="VoltGrid charging station">
-                    <div className="station-landscape" aria-hidden="true">
-                        <span className="distant-building building-one" />
-                        <span className="distant-building building-two" />
-                        <span className="station-tree tree-one" />
-                        <span className="station-tree tree-two" />
+                <div
+                    className={`immersive-scene ${
+                        focusedCharger?.arriving ? "is-arriving" : ""
+                    } scene-${focusedCharger?.status.toLowerCase() ?? "empty"}`}
+                    aria-label="VoltGrid cinematic EV charging simulation"
+                >
+                    <div className="scene-sky" aria-hidden="true">
+                        <i className="aurora aurora-one" />
+                        <i className="aurora aurora-two" />
+                        <i className="scene-moon" />
+                        <i className="city-silhouette" />
+                    </div>
+                    <div className="scene-grid" aria-hidden="true" />
+                    <div className="scene-lane" aria-hidden="true">
+                        <i />
+                        <i />
+                        <i />
                     </div>
 
-                    <div className="roadside-sign">
-                        <img className="sign-mark" src="/icon.svg" alt="" />
+                    <header className="scene-top-hud">
                         <div>
+                            <span className="scene-kicker">LIVE DIGITAL TWIN · BAY 01</span>
                             <strong>{site?.name ?? "VoltGrid Central"}</strong>
-                            <small>EV charging · Open 24 hours</small>
                         </div>
-                    </div>
-
-                    <div className="solar-canopy" aria-hidden="true">
-                        <div className="solar-panels">
-                            <i />
-                            <i />
-                            <i />
-                            <i />
+                        <div className="capacity-hud">
+                            <span>
+                                <small>Site limit</small>
+                                <strong>{formatPower(siteCapacityKw)}</strong>
+                            </span>
+                            <span>
+                                <small>Live demand</small>
+                                <strong>{formatPower(projectedDemandKw)}</strong>
+                            </span>
+                            <span className={unmetDemandKw > 0 ? "is-alert" : ""}>
+                                <small>Unmet</small>
+                                <strong>{formatPower(unmetDemandKw)}</strong>
+                            </span>
                         </div>
-                        <span className="canopy-brand">VOLTGRID</span>
-                    </div>
+                    </header>
 
-                    <div className="parking-area">
-                        <div className="station-bays">
-                            {[0, 1, 2, 3].map((bayIndex) => {
-                                const charger = chargers[bayIndex];
-                                const isConnected =
-                                    charger &&
-                                    !charger.arriving &&
-                                    charger.status !== "Offline" &&
-                                    charger.status !== "Error";
-
-                                return (
-                                    <article
-                                        className={`station-bay ${charger ? "is-occupied" : ""}`}
-                                        key={bayIndex}
-                                    >
-                                        <span className="bay-number">{bayIndex + 1}</span>
-                                        <div
-                                            className={`charger-pedestal ${isConnected ? "is-online" : ""}`}
-                                            aria-hidden="true"
-                                        >
-                                            <span className="charger-screen">
-                                                {charger
-                                                    ? CHARGER_SCREEN[charger.protocolStage]
-                                                    : "IDLE"}
-                                            </span>
-                                            <span className="charger-port" />
-                                        </div>
-                                        <span
-                                            className={`charger-cable ${isConnected ? "is-connected" : ""}`}
-                                            aria-hidden="true"
-                                        />
-
-                                        {charger && !charger.arriving ? (
-                                            <div
-                                                className={`scene-vehicle status-${charger.status.toLowerCase()}`}
-                                            >
-                                                <CarVisual color={CAR_COLORS[bayIndex]} />
-                                                <strong>{charger.id}</strong>
-                                                <small>{charger.status}</small>
-                                            </div>
-                                        ) : !charger ? (
-                                            <div className="empty-bay">
-                                                <span>EV</span>
-                                                <small>Available</small>
-                                            </div>
-                                        ) : null}
-                                    </article>
-                                );
-                            })}
-                        </div>
-                    </div>
-
-                    <div className="station-road">
-                        <span className="road-edge top" />
-                        <span className="road-mark mark-one" />
-                        <span className="road-mark mark-two" />
-                        <span className="road-mark mark-three" />
-                        <span className="road-arrow">→</span>
-                        <small>Station entrance</small>
-                    </div>
-
-                    {chargers.map((charger, bayIndex) =>
-                        charger.arriving ? (
-                            <div
-                                className="arrival-car"
-                                key={charger.id}
-                                style={
-                                    {
-                                        "--target-left": `${12.5 + bayIndex * 25}%`,
-                                    } as CSSProperties
-                                }
-                            >
-                                <CarVisual color={CAR_COLORS[bayIndex]} />
-                                <span>Arriving</span>
+                    {focusedCharger ? (
+                        <>
+                            <div className="scene-identity">
+                                <span>{focusedCharger.arriving ? "VEHICLE INBOUND" : "VEHICLE LINKED"}</span>
+                                <h1>VX-1 Electric</h1>
+                                <p>{focusedCharger.id} · {focusedCharger.idTag}</p>
                             </div>
-                        ) : null,
+
+                            <div
+                                className={`hero-vehicle ${
+                                    focusedCharger.arriving ? "is-driving" : "is-parked"
+                                }`}
+                            >
+                                <div className="vehicle-aura" aria-hidden="true" />
+                                <img src="/voltgrid-ev.png" alt="Simulated graphite electric crossover" />
+                                <span className="vehicle-scan" aria-hidden="true" />
+                                <span className="charge-port-beacon" aria-hidden="true" />
+                            </div>
+
+                            <div
+                                className={`charger-tower ${
+                                    focusedConnected ? "is-linked" : ""
+                                }`}
+                                aria-label={`Charger ${CHARGER_SCREEN[focusedCharger.protocolStage]}`}
+                            >
+                                <span className="tower-light" />
+                                <div className="tower-display">
+                                    <small>VOLTGRID</small>
+                                    <strong>{CHARGER_SCREEN[focusedCharger.protocolStage]}</strong>
+                                    <i>{focusedPowerKw.toFixed(1)} kW</i>
+                                </div>
+                                <span className="tower-port" />
+                                <span className="tower-base" />
+                            </div>
+
+                            <svg
+                                className={`energy-cable ${focusedConnected ? "is-live" : ""}`}
+                                viewBox="0 0 1000 560"
+                                preserveAspectRatio="none"
+                                aria-hidden="true"
+                            >
+                                <path d="M148 319 C 190 405, 316 431, 445 338" />
+                                <path className="energy-flow" d="M148 319 C 190 405, 316 431, 445 338" />
+                            </svg>
+
+                            <aside className="vehicle-telemetry" aria-label="Simulated vehicle telemetry">
+                                <div className="telemetry-title">
+                                    <span><i /> Simulated EV profile</span>
+                                    <strong>{focusedSoc.toFixed(0)}%</strong>
+                                </div>
+                                <div className="soc-rail">
+                                    <span style={{ width: `${focusedSoc}%` }} />
+                                </div>
+                                <div className="telemetry-grid">
+                                    <span>
+                                        <small>Battery</small>
+                                        <strong>{DEMO_BATTERY_KWH} kWh</strong>
+                                    </span>
+                                    <span>
+                                        <small>Requested</small>
+                                        <strong>{formatPower(focusedCharger.requestedPowerKw)}</strong>
+                                    </span>
+                                    <span>
+                                        <small>Received</small>
+                                        <strong className={focusedPowerKw < focusedCharger.requestedPowerKw && focusedCharger.status === "Charging" ? "shortfall" : ""}>
+                                            {formatPower(focusedPowerKw)}
+                                        </strong>
+                                    </span>
+                                    <span>
+                                        <small>Session</small>
+                                        <strong>{focusedSessionEnergyKwh.toFixed(1)} kWh</strong>
+                                    </span>
+                                </div>
+                            </aside>
+
+                            <aside className="session-console" aria-live="polite">
+                                <div className="console-heading">
+                                    <span className={`charger-status-dot status-${focusedCharger.status.toLowerCase()}`} />
+                                    <div>
+                                        <small>Session state</small>
+                                        <strong>{focusedCharger.status}</strong>
+                                    </div>
+                                </div>
+                                <dl>
+                                    <div><dt>Connector</dt><dd>{focusedCharger.connectorId}</dd></div>
+                                    <div><dt>Transaction</dt><dd>{focusedCharger.transactionId ?? "—"}</dd></div>
+                                    <div><dt>Tariff</dt><dd>₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)}/kWh</dd></div>
+                                    <div><dt>Live cost</dt><dd>₹{focusedSessionCostInr.toFixed(2)}</dd></div>
+                                </dl>
+                                {focusedCharger.invoice ? (
+                                    <div className="console-invoice">
+                                        <span>Invoice issued</span>
+                                        <strong>₹{focusedCharger.invoice.amountInr}</strong>
+                                    </div>
+                                ) : null}
+                            </aside>
+
+                            <section className="protocol-tunnel" aria-label="Live OCPP backend route">
+                                <div className="tunnel-heading">
+                                    <span><i /> LIVE OCPP SIGNAL</span>
+                                    <strong>{protocolMessage(focusedCharger.protocolStage)}</strong>
+                                </div>
+                                <div className="tunnel-route">
+                                    {[
+                                        ["EV", focusedCharger.idTag],
+                                        ["CHARGER", `Connector ${focusedCharger.connectorId}`],
+                                        ["CSMS", "Hono · Bun :6773"],
+                                        ["DATABASE", "PostgreSQL"],
+                                    ].map(([label, detail], index) => (
+                                        <div className="tunnel-section" key={label}>
+                                            <div className={`tunnel-node ${index < focusedRouteProgress ? "is-done" : ""} ${index === focusedRouteProgress ? "is-active" : ""}`}>
+                                                <b>{index === 0 ? "EV" : index === 1 ? "ϟ" : index === 2 ? "VG" : "DB"}</b>
+                                                <span><strong>{label}</strong><small>{detail}</small></span>
+                                            </div>
+                                            {index < 3 ? <span className={`tunnel-wire ${index < focusedRouteProgress ? "is-live" : ""}`}><i /></span> : null}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="packet-readout">
+                                    <span>PACKET</span>
+                                    <code>{protocolPacket(focusedCharger, focusedPowerKw)}</code>
+                                    <i>{focusedCharger.status === "Error" ? "FAILED" : "ACK"}</i>
+                                </div>
+                            </section>
+
+                            <div className="scene-action-bar">
+                                <div>
+                                    <span className={`status-dot ${backendOnline ? "is-online" : ""}`} />
+                                    <p>{focusedCharger.error ?? demoStatus}</p>
+                                </div>
+                                <button
+                                    className="cinematic-button"
+                                    onClick={() => void runDemo(focusedCharger.id)}
+                                    disabled={focusedCharger.arriving || focusedCharger.status === "Connecting" || focusedCharger.status === "Charging"}
+                                >
+                                    {focusedCharger.status === "Error" || focusedCharger.status === "Offline"
+                                        ? "Retry connection"
+                                        : focusedCharger.invoice
+                                          ? "Run another session"
+                                          : "Run full charging demo"}
+                                    <span>→</span>
+                                </button>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="empty-cinematic">
+                            <img src="/voltgrid-ev.png" alt="" />
+                            <span>STATION READY</span>
+                            <h1>Bring the first EV into the bay.</h1>
+                            <p>Add a simulated vehicle to watch its charger connection, OCPP handshake, energy flow, and billing lifecycle.</p>
+                        </div>
                     )}
 
-                    {showConnectionCinematic && focusedCharger ? (
-                        <aside
-                            className={`connection-cinematic cinematic-${focusedCharger.protocolStage}`}
-                            aria-live="polite"
-                        >
-                            <div className="cinematic-header">
-                                <div>
-                                    <span className="cinematic-live">
-                                        <i /> Live signal trace
-                                    </span>
-                                    <strong>
-                                        {protocolMessage(focusedCharger.protocolStage)}
-                                    </strong>
-                                </div>
-                                <span className="cinematic-stage">
-                                    {CHARGER_SCREEN[focusedCharger.protocolStage]}
-                                </span>
-                            </div>
-
-                            <div className="signal-route" aria-label="Backend signal route">
-                                {[
-                                    ["EV", focusedCharger.idTag],
-                                    ["CHARGER", `Connector ${focusedCharger.connectorId}`],
-                                    ["HONO CSMS", "OCPP handler"],
-                                    ["POSTGRES", "Durable record"],
-                                ].map(([label, detail], index) => {
-                                    const progress = routeProgress(
-                                        focusedCharger.protocolStage,
-                                    );
-
-                                    return (
-                                        <div className="route-section" key={label}>
-                                            <div
-                                                className={`route-node ${
-                                                    index < progress ? "is-done" : ""
-                                                } ${index === progress ? "is-active" : ""}`}
-                                            >
-                                                <b>{index === 0 ? "EV" : index === 1 ? "ϟ" : index === 2 ? "V" : "DB"}</b>
-                                                <span>
-                                                    <strong>{label}</strong>
-                                                    <small>{detail}</small>
-                                                </span>
-                                            </div>
-                                            {index < 3 ? (
-                                                <span
-                                                    className={`signal-wire ${
-                                                        index < progress ? "is-live" : ""
-                                                    }`}
-                                                >
-                                                    <i />
-                                                </span>
-                                            ) : null}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-
-                            <div className="packet-console">
-                                <span>OCPP / HTTP</span>
-                                <code>
-                                    {protocolPacket(focusedCharger, focusedPowerKw)}
-                                </code>
-                                <i>CSMS ACK</i>
-                            </div>
-                        </aside>
-                    ) : null}
-
-                    {chargers.map((focusedCharger, focusedChargerIndex) => {
-                        if (focusedCharger.arriving) {
-                            return null;
-                        }
-
-                        const focusedSessionEnergyKwh = Math.max(
-                            0,
-                            (focusedCharger.meterWh -
-                                (focusedCharger.sessionStartWh ?? focusedCharger.meterWh)) /
-                                1000,
-                        );
-                        const focusedSessionCostInr =
-                            focusedSessionEnergyKwh *
-                            ((site?.tariffPaisePerKwh ?? 800) / 100);
-                        const focusedPowerKw =
-                            baselinePowerById.get(focusedCharger.id) ?? 0;
-
-                        return (
-                        <aside
-                            className={`vehicle-stage-card stage-${focusedCharger.status.toLowerCase()} ${
-                                focusedCharger.id === focusedChargerId ? "is-focused" : ""
-                            }`}
-                            key={focusedCharger.id}
-                            style={
-                                {
-                                    "--stage-left": `${12.5 + focusedChargerIndex * 25}%`,
-                                } as CSSProperties
-                            }
-                            aria-live="polite"
-                            onClick={() => showStation(focusedCharger.id)}
-                        >
-                            {focusedCharger.status === "Charging" ? (
-                                <>
-                                    <div className="stage-card-heading">
-                                        <span className="charging-indicator" />
-                                        <div>
-                                            <small>Live charging</small>
-                                            <strong>{focusedCharger.id}</strong>
-                                        </div>
-                                    </div>
-                                    <div className="charging-progress">
-                                        <span
-                                            style={{
-                                                width: `${Math.min(100, focusedSessionEnergyKwh * 25)}%`,
-                                            }}
-                                        />
-                                    </div>
-                                    <div className="stage-stats">
-                                        <div>
-                                            <small>Energy added</small>
-                                            <strong>{focusedSessionEnergyKwh.toFixed(1)} kWh</strong>
-                                        </div>
-                                        <div>
-                                            <small>Power received</small>
-                                            <strong
-                                                className={
-                                                    focusedPowerKw < focusedCharger.requestedPowerKw
-                                                        ? "power-shortfall"
-                                                        : undefined
-                                                }
-                                            >
-                                                {formatPower(focusedPowerKw)} / {formatPower(focusedCharger.requestedPowerKw)}
-                                            </strong>
-                                        </div>
-                                        <div>
-                                            <small>Live cost</small>
-                                            <strong>₹{focusedSessionCostInr.toFixed(2)}</strong>
-                                        </div>
-                                    </div>
-                                </>
-                            ) : focusedCharger.invoice ? (
-                                <>
-                                    <div className="stage-card-heading complete-heading">
-                                        <span className="complete-mark">✓</span>
-                                        <div>
-                                            <small>Charging complete</small>
-                                            <strong>Invoice ₹{focusedCharger.invoice.amountInr}</strong>
-                                        </div>
-                                    </div>
-                                    <div className="stage-summary">
-                                        <span>{focusedCharger.invoice.energyKwh.toFixed(2)} kWh delivered</span>
-                                        <span>Transaction {focusedCharger.transactionId}</span>
-                                    </div>
-                                    <button
-                                        className="stage-action"
-                                        onClick={() => void runDemo(focusedCharger.id)}
-                                    >
-                                        Run another session
-                                    </button>
-                                </>
-                            ) : focusedCharger.status === "Available" ? (
-                                <>
-                                    <div className="stage-card-heading">
-                                        <span className="ready-mark">↯</span>
-                                        <div>
-                                            <small>Connected and ready</small>
-                                            <strong>{focusedCharger.id}</strong>
-                                        </div>
-                                    </div>
-                                    <div className="stage-summary">
-                                        <span>{focusedCharger.idTag}</span>
-                                        <span>Connector {focusedCharger.connectorId}</span>
-                                        <span>Needs {formatPower(focusedCharger.requestedPowerKw)}</span>
-                                    </div>
-                                    <button
-                                        className="stage-action"
-                                        onClick={() => void runDemo(focusedCharger.id)}
-                                    >
-                                        Run full charging demo
-                                    </button>
-                                </>
+                    <nav className="fleet-switcher" aria-label="Vehicles on station">
+                        {[0, 1, 2, 3].map((bayIndex) => {
+                            const charger = chargers[bayIndex];
+                            return charger ? (
+                                <button
+                                    key={charger.id}
+                                    className={charger.id === focusedCharger?.id ? "is-active" : ""}
+                                    onClick={() => showStation(charger.id)}
+                                >
+                                    <i className={`status-${charger.status.toLowerCase()}`} />
+                                    <span><small>Bay {bayIndex + 1}</small><strong>{charger.id}</strong></span>
+                                </button>
                             ) : (
-                                <>
-                                    <div className="stage-card-heading">
-                                        <span className="stage-spinner" />
-                                        <div>
-                                            <small>
-                                                {focusedCharger.status === "Error"
-                                                    ? "Connection problem"
-                                                    : "Preparing charger"}
-                                            </small>
-                                            <strong>{focusedCharger.id}</strong>
-                                        </div>
-                                    </div>
-                                    <p className="stage-message">
-                                        {focusedCharger.error ??
-                                            protocolMessage(
-                                                focusedCharger.protocolStage,
-                                            )}
-                                    </p>
-                                    {focusedCharger.status === "Error" ||
-                                    focusedCharger.status === "Offline" ? (
-                                        <button
-                                            className="stage-action"
-                                            onClick={() => void runDemo(focusedCharger.id)}
-                                        >
-                                            Retry connection
-                                        </button>
-                                    ) : null}
-                                </>
-                            )}
-                        </aside>
-                        );
-                    })}
+                                <span className="empty-slot" key={bayIndex}>Bay {bayIndex + 1} · Open</span>
+                            );
+                        })}
+                    </nav>
 
                     {unmetDemandKw > 0 ? (
                         <div className="power-warning" role="status">
-                            <strong>Load balancing problem</strong>
-                            <span>
-                                {formatPower(projectedDemandKw)} requested exceeds the {formatPower(siteCapacityKw)} site limit. {formatPower(unmetDemandKw)} of demand is unmet.
-                            </span>
+                            <strong>CAPACITY CONFLICT</strong>
+                            <span>{formatPower(projectedDemandKw)} requested · {formatPower(unmetDemandKw)} cannot be supplied</span>
                         </div>
                     ) : null}
-
-                    <div className="station-event">
-                        <span className={`status-dot ${backendOnline ? "is-online" : ""}`} />
-                        <strong>{demoStatus}</strong>
-                    </div>
-
-                    <div className="station-floor-footer">
-                        <span>{chargers.length} of 4 bays occupied</span>
-                        <span>
-                            Site limit {formatPower(siteCapacityKw)} · Demand {formatPower(projectedDemandKw)} · Supplied {formatPower(suppliedPowerKw)}
-                            {unmetDemandKw > 0 ? ` · Unmet ${formatPower(unmetDemandKw)}` : ""}
-                        </span>
-                    </div>
                 </div>
             </section>
 
