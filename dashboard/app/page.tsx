@@ -143,6 +143,42 @@ function protocolMessage(stage: ProtocolStage) {
     return `${step[0]} · ${step[1]}`;
 }
 
+function routeProgress(stage: ProtocolStage) {
+    if (stage === "cable") return 1;
+    if (["websocket", "boot", "status", "authorize"].includes(stage)) return 2;
+    if (["meter", "stop", "invoice", "complete"].includes(stage)) return 3;
+    return 0;
+}
+
+function protocolPacket(charger: SimulatedCharger, suppliedPowerKw: number) {
+    switch (charger.protocolStage) {
+        case "cable":
+            return `Connector locked · EV requests ${formatPower(charger.requestedPowerKw)}`;
+        case "websocket":
+            return `GET /ocpp/${charger.id} · Upgrade: WebSocket`;
+        case "boot":
+            return "CALL BootNotification · vendor=VoltGrid Simulator";
+        case "status":
+            return `CALL StatusNotification · connector=${charger.connectorId} · Available`;
+        case "authorize":
+            return `CALL StartTransaction · idTag=${charger.idTag}`;
+        case "meter":
+            return suppliedPowerKw > 0
+                ? `CALL MeterValues · ${charger.meterWh} Wh → PostgreSQL`
+                : "MeterValues paused · site capacity exhausted";
+        case "stop":
+            return `CALL StopTransaction · meterStop=${charger.meterWh} Wh`;
+        case "invoice":
+            return `POST /api/sessions/${charger.transactionId}/invoice`;
+        case "complete":
+            return `Invoice issued · ₹${charger.invoice?.amountInr ?? "0.00"}`;
+        case "error":
+            return charger.error ?? "OCPP connection failed";
+        default:
+            return "Vehicle approaching charging bay";
+    }
+}
+
 const wait = (milliseconds: number) =>
     new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -681,6 +717,7 @@ export default function Home() {
 
             updateCharger(id, { protocolStage: "invoice" });
             setDemoStatus(`${id} session accepted · generating invoice`);
+            await wait(650);
 
             const invoiceResponse = await fetch(
                 `${CSMS_HTTP_URL}/api/sessions/${charger.transactionId}/invoice`,
@@ -905,9 +942,13 @@ export default function Home() {
     const focusedCharger =
         chargers.find((charger) => charger.id === focusedChargerId) ??
         chargers.at(-1);
-    const focusedProtocol = focusedCharger
-        ? PROTOCOL_PROGRESS[focusedCharger.protocolStage]
-        : undefined;
+    const focusedPowerKw = focusedCharger
+        ? baselinePowerById.get(focusedCharger.id) ?? 0
+        : 0;
+    const showConnectionCinematic =
+        focusedCharger &&
+        !focusedCharger.arriving &&
+        !["ready", "complete"].includes(focusedCharger.protocolStage);
     return (
         <main className="shell">
             <header className="topbar">
@@ -1029,6 +1070,73 @@ export default function Home() {
                             </div>
                         ) : null,
                     )}
+
+                    {showConnectionCinematic && focusedCharger ? (
+                        <aside
+                            className={`connection-cinematic cinematic-${focusedCharger.protocolStage}`}
+                            aria-live="polite"
+                        >
+                            <div className="cinematic-header">
+                                <div>
+                                    <span className="cinematic-live">
+                                        <i /> Live signal trace
+                                    </span>
+                                    <strong>
+                                        {protocolMessage(focusedCharger.protocolStage)}
+                                    </strong>
+                                </div>
+                                <span className="cinematic-stage">
+                                    {CHARGER_SCREEN[focusedCharger.protocolStage]}
+                                </span>
+                            </div>
+
+                            <div className="signal-route" aria-label="Backend signal route">
+                                {[
+                                    ["EV", focusedCharger.idTag],
+                                    ["CHARGER", `Connector ${focusedCharger.connectorId}`],
+                                    ["HONO CSMS", "OCPP handler"],
+                                    ["POSTGRES", "Durable record"],
+                                ].map(([label, detail], index) => {
+                                    const progress = routeProgress(
+                                        focusedCharger.protocolStage,
+                                    );
+
+                                    return (
+                                        <div className="route-section" key={label}>
+                                            <div
+                                                className={`route-node ${
+                                                    index < progress ? "is-done" : ""
+                                                } ${index === progress ? "is-active" : ""}`}
+                                            >
+                                                <b>{index === 0 ? "EV" : index === 1 ? "ϟ" : index === 2 ? "V" : "DB"}</b>
+                                                <span>
+                                                    <strong>{label}</strong>
+                                                    <small>{detail}</small>
+                                                </span>
+                                            </div>
+                                            {index < 3 ? (
+                                                <span
+                                                    className={`signal-wire ${
+                                                        index < progress ? "is-live" : ""
+                                                    }`}
+                                                >
+                                                    <i />
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            <div className="packet-console">
+                                <span>OCPP / HTTP</span>
+                                <code>
+                                    {protocolPacket(focusedCharger, focusedPowerKw)}
+                                </code>
+                                <i>CSMS ACK</i>
+                            </div>
+                        </aside>
+                    ) : null}
 
                     {chargers.map((focusedCharger, focusedChargerIndex) => {
                         if (focusedCharger.arriving) {
@@ -1305,54 +1413,6 @@ export default function Home() {
                             {parkedChargers.length} parked vehicle{parkedChargers.length === 1 ? "" : "s"}
                         </span>
                     </div>
-
-                    {focusedCharger && focusedProtocol ? (
-                        <aside className="protocol-monitor" aria-live="polite">
-                            <div className="protocol-monitor-header">
-                                <div>
-                                    <small>Live backend flow</small>
-                                    <strong>{focusedCharger.id}</strong>
-                                </div>
-                                <span>{CHARGER_SCREEN[focusedCharger.protocolStage]}</span>
-                            </div>
-                            <div className="vehicle-handshake">
-                                <span>
-                                    <small>Driver tag</small>
-                                    <strong>{focusedCharger.idTag}</strong>
-                                </span>
-                                <span>
-                                    <small>Connector</small>
-                                    <strong>{focusedCharger.connectorId}</strong>
-                                </span>
-                                <span>
-                                    <small>Power need</small>
-                                    <strong>{formatPower(focusedCharger.requestedPowerKw)}</strong>
-                                </span>
-                            </div>
-                            <ol className="protocol-steps">
-                                {OCPP_JOURNEY.map(([action, detail], index) => {
-                                    const done = index <= focusedProtocol.doneThrough;
-                                    const active = index === focusedProtocol.active;
-
-                                    return (
-                                        <li
-                                            className={`${done ? "is-done" : ""} ${
-                                                active ? "is-active" : ""
-                                            }`}
-                                            key={action}
-                                        >
-                                            <i>{done ? "✓" : index + 1}</i>
-                                            <span>
-                                                <strong>{action}</strong>
-                                                <small>{detail}</small>
-                                            </span>
-                                            {active ? <em>LIVE</em> : null}
-                                        </li>
-                                    );
-                                })}
-                            </ol>
-                        </aside>
-                    ) : null}
 
                     {parkedChargers.length === 0 ? (
                         <div className="empty-state">
