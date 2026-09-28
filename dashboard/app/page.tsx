@@ -1,7 +1,6 @@
 "use client";
 
 import {
-    type CSSProperties,
     FormEvent,
     useEffect,
     useRef,
@@ -214,6 +213,8 @@ function routeProgress(stage: ProtocolStage) {
 
 function protocolPacket(charger: SimulatedCharger, suppliedPowerKw: number) {
     switch (charger.protocolStage) {
+        case "arrival":
+            return `Vehicle ${charger.id} approaching charging bay`;
         case "cable":
             return charger.status === "Parked"
                 ? `Awaiting plan confirmation · EV requests ${formatPower(charger.requestedPowerKw)}`
@@ -224,6 +225,8 @@ function protocolPacket(charger: SimulatedCharger, suppliedPowerKw: number) {
             return "CALL BootNotification · vendor=VoltGrid Simulator";
         case "status":
             return `CALL StatusNotification · connector=${charger.connectorId} · Available`;
+        case "ready":
+            return "WebSocket open · charger ready for StartTransaction";
         case "authorize":
             return `CALL StartTransaction · idTag=${charger.idTag}`;
         case "meter":
@@ -240,8 +243,6 @@ function protocolPacket(charger: SimulatedCharger, suppliedPowerKw: number) {
                 : `Invoice issued · ₹${charger.invoice?.amountInr ?? "0.00"}`;
         case "error":
             return charger.error ?? "OCPP connection failed";
-        default:
-            return "Vehicle approaching charging bay";
     }
 }
 
@@ -1271,10 +1272,23 @@ export default function Home() {
                                             <small>Battery / SOC</small>
                                             <strong>{focusedCharger.batteryKwh} kWh · {focusedCharger.startingSoc}%</strong>
                                         </span>
-                                        <span>
-                                            <small>Max request</small>
-                                            <strong>{formatPower(focusedCharger.requestedPowerKw)}</strong>
-                                        </span>
+                                        <label className="offer-power-input">
+                                            <small>Requested power (kW)</small>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                step="any"
+                                                value={focusedCharger.requestedPowerKw}
+                                                onChange={(event) =>
+                                                    updateCharger(focusedCharger.id, {
+                                                        requestedPowerKw: Math.max(
+                                                            0,
+                                                            Number(event.target.value),
+                                                        ),
+                                                    })
+                                                }
+                                            />
+                                        </label>
                                     </div>
                                     <div className="plan-options" aria-label="Select energy amount">
                                         {CHARGE_OPTIONS_KWH.map((energyKwh) => (
@@ -1449,6 +1463,19 @@ export default function Home() {
                                         <span className={`overhead-car status-${charger.status.toLowerCase()} ${charger.arriving ? "car-arrival" : ""}`}>
                                             <CarVisual color={CAR_COLORS[bayIndex]} />
                                         </span>
+                                        {charger.status === "Charging" &&
+                                        (baselinePowerById.get(charger.id) ?? 0) <
+                                            charger.requestedPowerKw ? (
+                                            <span className="bay-power-error">
+                                                <strong>STATION MESSAGE</strong>
+                                                <span>
+                                                    Only {formatPower(unusedCapacityKw)} remains. This EV asked for {formatPower(charger.requestedPowerKw)}.
+                                                </span>
+                                                <small>
+                                                    Supplied {formatPower(baselinePowerById.get(charger.id) ?? 0)} · Fair load balancer required
+                                                </small>
+                                            </span>
+                                        ) : null}
                                         <span className={`overhead-cable ${charger.status === "Charging" ? "is-charging" : ""}`} />
                                         <span className="mini-bay-copy">
                                             <small>Bay {bayIndex + 1} · {charger.vehicleModel}</small>
@@ -1591,7 +1618,7 @@ export default function Home() {
                         </span>
                         <span className="live-label">
                             <span className="status-dot" />
-                            {parkedChargers.length} parked vehicle{parkedChargers.length === 1 ? "" : "s"}
+                            {parkedChargers.length} vehicle{parkedChargers.length === 1 ? "" : "s"} on site
                         </span>
                     <i aria-hidden="true">⌄</i>
                     </summary>
@@ -1674,6 +1701,20 @@ export default function Home() {
                                                 : "0 kW"}
                                         </strong>
                                     </div>
+                                    {charger.status === "Charging" &&
+                                    (baselinePowerById.get(charger.id) ?? 0) <
+                                        charger.requestedPowerKw ? (
+                                        <div className="station-power-message" role="status">
+                                            <span>Station message</span>
+                                            <strong>Not enough power for this EV</strong>
+                                            <p>
+                                                {formatPower(unusedCapacityKw)} remains, but the EV requested {formatPower(charger.requestedPowerKw)}. Phase 1 does not divide the available power.
+                                            </p>
+                                            <small>
+                                                Phase 2 solution: a fair water-filling load balancer will redistribute the {formatPower(siteCapacityKw)} site limit across active EVs.
+                                            </small>
+                                        </div>
+                                    ) : null}
                                     <div className="tariff-strip">
                                         <span>Station tariff</span>
                                         <strong>
