@@ -587,7 +587,8 @@ input:focus-visible {
 .status-available { background: var(--green); box-shadow: 0 0 10px rgba(88, 245, 154, 0.6); }
 .status-parked { background: var(--lime); box-shadow: 0 0 10px rgba(217, 255, 120, 0.52); }
 .status-preparing, .status-connecting { background: var(--amber); box-shadow: 0 0 10px rgba(255, 186, 102, 0.55); }
-.status-charging { background: var(--cyan); box-shadow: 0 0 11px rgba(85, 223, 247, 0.65); animation: status-pulse 1.25s infinite; }
+.status-charging { background: var(--cyan); box-shadow: 0 0 11px rgba(85, 223, 247, 0.65); }
+.charger-status-dot.status-charging { animation: status-pulse 1.25s infinite; }
 .status-error { background: var(--red); }
 .status-offline { background: #63716d; }
 @keyframes status-pulse { 50% { opacity: 0.35; transform: scale(0.76); } }
@@ -1187,24 +1188,28 @@ body {
 @keyframes cable-current-simple { 50% { filter: drop-shadow(0 0 3px #56a971); } }
 
 .mini-bay-copy {
-    position: relative;
+    position: absolute;
     z-index: 5;
     display: grid;
     width: 100%;
-    min-height: 39px;
+    min-height: 36px;
+    right: 0;
+    bottom: 0;
+    left: 0;
     align-content: center;
     gap: 3px;
-    padding: 4px 5px;
+    padding: 4px 6px;
     color: #24362b;
-    border-top: 1px solid rgba(255, 255, 255, 0.85);
-    background: rgba(248, 250, 248, 0.96);
+    border-top: 1px solid rgba(255, 255, 255, 0.9);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+    background: transparent;
     text-align: center;
 }
 
 .mini-bay-copy small {
     overflow: hidden;
     color: #68786e;
-    font-size: 6px;
+    font-size: 9px;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -1215,7 +1220,7 @@ body {
     justify-content: center;
     gap: 5px;
     overflow: hidden;
-    font-size: 8px;
+    font-size: 11px;
     text-overflow: ellipsis;
     white-space: nowrap;
 }

@@ -1450,10 +1450,10 @@ export default function Home() {
                                             <CarVisual color={CAR_COLORS[bayIndex]} />
                                         </span>
                                         <span className={`overhead-cable ${charger.status === "Charging" ? "is-charging" : ""}`} />
-                                    </span>
-                                    <span className="mini-bay-copy">
-                                        <small>Bay {bayIndex + 1} · {charger.vehicleModel}</small>
-                                        <strong><i className={`charger-status-dot status-${charger.status.toLowerCase()}`} />{charger.id}</strong>
+                                        <span className="mini-bay-copy">
+                                            <small>Bay {bayIndex + 1} · {charger.vehicleModel}</small>
+                                            <strong><i className={`charger-status-dot status-${charger.status.toLowerCase()}`} />{charger.id}</strong>
+                                        </span>
                                     </span>
                                 </button>
                             ) : (
@@ -1461,8 +1461,8 @@ export default function Home() {
                                     <span className="overhead-bay empty-overhead-bay" aria-hidden="true">
                                         <span className="overhead-bay-number">0{bayIndex + 1}</span>
                                         <span className="empty-bay-outline" />
+                                        <span className="mini-bay-copy"><small>Bay {bayIndex + 1}</small><strong>Available</strong></span>
                                     </span>
-                                    <span className="mini-bay-copy"><small>Bay {bayIndex + 1}</small><strong>Available</strong></span>
                                 </span>
                             );
                         })}
