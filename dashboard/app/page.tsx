@@ -1,6 +1,7 @@
 "use client";
 
 import {
+    type CSSProperties,
     FormEvent,
     useEffect,
     useRef,
@@ -15,6 +16,7 @@ const CSMS_WS_URL =
     process.env.NEXT_PUBLIC_CSMS_WS_URL ?? "ws://localhost:6773";
 const DEFAULT_SITE_CAPACITY_KW = 100;
 const DEFAULT_CAR_POWER_KW = 50;
+const CAR_COLORS = ["#2f6fed", "#e45d3f", "#25866f", "#7657c8"];
 const CHARGE_OPTIONS_KWH = [10, 20, 40] as const;
 const VEHICLE_PROFILES = [
     { model: "VX-1 Electric", batteryKwh: 72, rangeKm: 480, startingSoc: 42 },
@@ -148,6 +150,7 @@ type SimulatedCharger = {
     rangeKm: number;
     startingSoc: number;
     targetEnergyKwh: number;
+    sessionStartedAt?: string;
     connectorId: number;
     requestedPowerKw: number;
     protocolStage: ProtocolStage;
@@ -186,6 +189,20 @@ function formatWh(meterWh: number) {
 
 function formatPower(powerKw: number) {
     return `${powerKw.toFixed(powerKw % 1 === 0 ? 0 : 1)} kW`;
+}
+
+function formatDateTime(value?: string) {
+    if (!value || !Number.isFinite(Date.parse(value))) return "—";
+    return new Intl.DateTimeFormat("en-IN", {
+        dateStyle: "medium",
+        timeStyle: "short",
+    }).format(new Date(value));
+}
+
+function formatDuration(startedAt?: string, endedAt?: string) {
+    const seconds = Math.max(0, Math.floor((Date.parse(endedAt ?? "") - Date.parse(startedAt ?? "")) / 1000));
+    if (!Number.isFinite(seconds)) return "—";
+    return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 function routeProgress(stage: ProtocolStage) {
@@ -249,23 +266,25 @@ function getProfileLimitKw(payload: unknown) {
         : 0;
 }
 
-function CartoonEv() {
+function CarVisual({ color }: { color: string }) {
     return (
-        <div className="cartoon-ev" role="img" aria-label="Cartoon electric vehicle">
-            <span className="ev-roof">
-                <i className="ev-window rear" />
-                <i className="ev-window front" />
-            </span>
-            <span className="ev-body">
-                <i className="ev-door rear" />
-                <i className="ev-door front" />
-                <i className="ev-headlight" />
-                <i className="ev-tail-light" />
-                <i className="ev-charge-door">⚡</i>
-            </span>
-            <span className="ev-wheel rear"><i /></span>
-            <span className="ev-wheel front"><i /></span>
-        </div>
+        <svg className="car-visual" viewBox="0 0 84 150" role="img" aria-label="Electric vehicle">
+            <ellipse cx="42" cy="140" rx="31" ry="7" fill="rgba(24, 35, 29, 0.2)" />
+            <rect x="3" y="34" width="8" height="29" rx="4" fill="#26302e" />
+            <rect x="73" y="34" width="8" height="29" rx="4" fill="#26302e" />
+            <rect x="3" y="91" width="8" height="29" rx="4" fill="#26302e" />
+            <rect x="73" y="91" width="8" height="29" rx="4" fill="#26302e" />
+            <path d="M25 4h34c8 0 14 7 16 17l5 101c1 13-8 23-20 23H24c-12 0-21-10-20-23L9 21C11 11 17 4 25 4Z" fill={color} stroke="rgba(20, 30, 28, 0.3)" strokeWidth="2" />
+            <path d="M20 34c2-12 7-19 14-21h16c7 2 12 9 14 21l2 17H18l2-17Z" fill="#cde1e6" />
+            <path d="M19 92h46l-3 28c-1 7-6 11-12 12H34c-6-1-11-5-12-12l-3-28Z" fill="#a8c1c8" />
+            <rect x="19" y="56" width="46" height="31" rx="9" fill={color} opacity="0.84" />
+            <rect x="15" y="16" width="12" height="5" rx="2.5" fill="#fff8cc" />
+            <rect x="57" y="16" width="12" height="5" rx="2.5" fill="#fff8cc" />
+            <rect x="15" y="126" width="12" height="5" rx="2.5" fill="#ee6760" />
+            <rect x="57" y="126" width="12" height="5" rx="2.5" fill="#ee6760" />
+            <circle cx="42" cy="73" r="7" fill="rgba(255, 255, 255, 0.2)" />
+            <path d="m38 64 10 8-7 2 4 8-11-10 7-2-3-6Z" fill="white" />
+        </svg>
     );
 }
 
@@ -602,6 +621,7 @@ export default function Home() {
                 error: undefined,
                 invoice: undefined,
                 paymentStatus: undefined,
+                sessionStartedAt: undefined,
             });
 
             await sendCall(id, "StatusNotification", {
@@ -613,11 +633,12 @@ export default function Home() {
             setDemoStatus(`${id} → StartTransaction · authorising ${charger.idTag}`);
             await wait(900);
 
+            const transactionStartedAt = new Date().toISOString();
             const response = await sendCall(id, "StartTransaction", {
                 connectorId: charger.connectorId,
                 idTag: charger.idTag,
                 meterStart: charger.meterWh,
-                timestamp: new Date().toISOString(),
+                timestamp: transactionStartedAt,
             });
 
             const transactionStatus =
@@ -652,6 +673,7 @@ export default function Home() {
                 transactionId: response.transactionId,
                 meterWh,
                 sessionStartWh: meterWh,
+                sessionStartedAt: transactionStartedAt,
                 invoice: undefined,
                 paymentStatus: undefined,
             });
@@ -1020,6 +1042,7 @@ export default function Home() {
         0,
     );
     const unmetDemandKw = Math.max(0, projectedDemandKw - suppliedPowerKw);
+    const unusedCapacityKw = Math.max(0, siteCapacityKw - suppliedPowerKw);
     const focusedCharger =
         chargers.find((charger) => charger.id === focusedChargerId) ??
         chargers.at(-1);
@@ -1098,9 +1121,11 @@ export default function Home() {
 
             <section className="station-experience">
                 <div
-                    className={`immersive-scene ${
+                    className={`immersive-scene topdown-station ${
                         focusedCharger?.arriving ? "is-arriving" : ""
-                    } scene-${focusedCharger?.status.toLowerCase() ?? "empty"}`}
+                    } scene-${focusedCharger?.status.toLowerCase() ?? "empty"} ${
+                        focusedCharger?.invoice ? "has-invoice" : ""
+                    }`}
                     aria-label="VoltGrid cinematic EV charging simulation"
                 >
                     <div className="scene-sky" aria-hidden="true">
@@ -1118,7 +1143,7 @@ export default function Home() {
 
                     <header className="scene-top-hud">
                         <div>
-                            <span className="scene-kicker">LIVE DIGITAL TWIN · BAY 01</span>
+                            <span className="scene-kicker">STATION OVERVIEW · 4 CHARGING BAYS</span>
                             <strong>{site?.name ?? "VoltGrid Central"}</strong>
                         </div>
                         <div className="capacity-hud">
@@ -1127,7 +1152,7 @@ export default function Home() {
                                 <strong>{formatPower(siteCapacityKw)}</strong>
                             </span>
                             <span>
-                                <small>Live demand</small>
+                                <small>Requested load</small>
                                 <strong>{formatPower(projectedDemandKw)}</strong>
                             </span>
                             <span className={unmetDemandKw > 0 ? "is-alert" : ""}>
@@ -1157,7 +1182,6 @@ export default function Home() {
                                 }`}
                             >
                                 <div className="vehicle-aura" aria-hidden="true" />
-                                <CartoonEv />
                                 <span className="vehicle-scan" aria-hidden="true" />
                                 <span className="charge-port-beacon" aria-hidden="true" />
                             </div>
@@ -1307,6 +1331,19 @@ export default function Home() {
                                             </div>
                                         </>
                                     )}
+                                    <dl className="receipt-details">
+                                        <div><dt>Vehicle</dt><dd>{focusedCharger.vehicleModel}</dd></div>
+                                        <div><dt>Battery / starting charge</dt><dd>{focusedCharger.batteryKwh} kWh · {focusedCharger.startingSoc}%</dd></div>
+                                        <div><dt>Vehicle energy requested</dt><dd>{focusedCharger.targetEnergyKwh.toFixed(1)} kWh</dd></div>
+                                        <div><dt>Energy delivered</dt><dd>{focusedCharger.invoice.energyKwh.toFixed(2)} kWh</dd></div>
+                                        <div><dt>Maximum power request</dt><dd>{formatPower(focusedCharger.requestedPowerKw)}</dd></div>
+                                        <div><dt>Rate</dt><dd>₹{(focusedCharger.invoice.tariffPaisePerKwh / 100).toFixed(2)} / kWh</dd></div>
+                                        <div><dt>Started</dt><dd>{formatDateTime(focusedCharger.sessionStartedAt)}</dd></div>
+                                        <div><dt>Completed</dt><dd>{formatDateTime(focusedCharger.invoice.issuedAt)}</dd></div>
+                                        <div><dt>Elapsed time</dt><dd>{formatDuration(focusedCharger.sessionStartedAt, focusedCharger.invoice.issuedAt)}</dd></div>
+                                        <div><dt>Session</dt><dd>{focusedCharger.transactionId ?? "—"}</dd></div>
+                                        <div className="receipt-total"><dt>Total amount</dt><dd>₹{focusedCharger.invoice.amountInr}</dd></div>
+                                    </dl>
                                 </aside>
                             ) : (
                                 <aside className="session-console" aria-live="polite">
@@ -1324,11 +1361,13 @@ export default function Home() {
                                 </aside>
                             )}
 
-                            <section className="protocol-tunnel" aria-label="Live OCPP backend route">
-                                <div className="tunnel-heading">
+                            {!focusedCharger.invoice ? (
+                            <details className="protocol-tunnel" aria-label="Live OCPP backend route" open>
+                                <summary className="tunnel-heading">
                                     <span><i /> LIVE BACKEND TRACE</span>
                                     <strong>{stageDetails.message}</strong>
-                                </div>
+                                    <b aria-hidden="true">⌄</b>
+                                </summary>
                                 <div className="tunnel-route">
                                     {[
                                         ["EV", focusedCharger.idTag],
@@ -1355,7 +1394,8 @@ export default function Home() {
                                     <code>{protocolPacket(focusedCharger, focusedPowerKw)}</code>
                                     <i>{focusedCharger.status === "Error" ? "FAILED" : "ACK"}</i>
                                 </div>
-                            </section>
+                            </details>
+                            ) : null}
 
                             <div className="scene-action-bar">
                                 <div>
@@ -1384,7 +1424,6 @@ export default function Home() {
                         </>
                     ) : (
                         <div className="empty-cinematic">
-                            <CartoonEv />
                             <span>STATION READY</span>
                             <h1>Bring the first EV into the bay.</h1>
                             <p>Add a simulated vehicle to watch its charger connection, OCPP handshake, energy flow, and billing lifecycle.</p>
@@ -1397,23 +1436,33 @@ export default function Home() {
                             return charger ? (
                                 <button
                                     key={charger.id}
-                                    className={charger.id === focusedCharger?.id ? "is-active" : ""}
+                                    className={`${charger.id === focusedCharger?.id ? "is-active" : ""} ${charger.arriving ? "is-arriving" : ""}`}
                                     onClick={() => showStation(charger.id)}
+                                    aria-label={`Bay ${bayIndex + 1}, ${charger.id}, ${charger.status}`}
                                 >
-                                    <span className="mini-bay-visual" aria-hidden="true">
-                                        <i className="mini-charger" />
-                                        <i className={`mini-car status-${charger.status.toLowerCase()}`} />
-                                        <i className="mini-bay-line" />
+                                    <span className="overhead-bay" aria-hidden="true">
+                                        <span className="overhead-bay-number">0{bayIndex + 1}</span>
+                                        <span className={`overhead-charger ${focusedConnected && charger.id === focusedCharger?.id ? "is-connected" : ""}`}>
+                                            <i />
+                                            <small>{CHARGER_SCREEN[charger.protocolStage]}</small>
+                                        </span>
+                                        <span className={`overhead-car status-${charger.status.toLowerCase()} ${charger.arriving ? "car-arrival" : ""}`}>
+                                            <CarVisual color={CAR_COLORS[bayIndex]} />
+                                        </span>
+                                        <span className={`overhead-cable ${charger.status === "Charging" ? "is-charging" : ""}`} />
                                     </span>
                                     <span className="mini-bay-copy">
-                                        <small>Bay {bayIndex + 1} · {charger.status}</small>
-                                        <strong>{charger.id}</strong>
+                                        <small>Bay {bayIndex + 1} · {charger.vehicleModel}</small>
+                                        <strong><i className={`charger-status-dot status-${charger.status.toLowerCase()}`} />{charger.id}</strong>
                                     </span>
                                 </button>
                             ) : (
                                 <span className="empty-slot" key={bayIndex}>
-                                    <i className="empty-bay-outline" />
-                                    Bay {bayIndex + 1} · Open
+                                    <span className="overhead-bay empty-overhead-bay" aria-hidden="true">
+                                        <span className="overhead-bay-number">0{bayIndex + 1}</span>
+                                        <span className="empty-bay-outline" />
+                                    </span>
+                                    <span className="mini-bay-copy"><small>Bay {bayIndex + 1}</small><strong>Available</strong></span>
                                 </span>
                             );
                         })}
@@ -1422,7 +1471,12 @@ export default function Home() {
                     {unmetDemandKw > 0 ? (
                         <div className="power-warning" role="status">
                             <strong>CAPACITY CONFLICT</strong>
-                            <span>{formatPower(projectedDemandKw)} requested · {formatPower(unmetDemandKw)} cannot be supplied</span>
+                            <span>
+                                {formatPower(projectedDemandKw)} requested · {formatPower(unmetDemandKw)} unmet
+                                {unusedCapacityKw > 0
+                                    ? ` · ${formatPower(unusedCapacityKw)} unused; below the next full request`
+                                    : ""}
+                            </span>
                         </div>
                     ) : null}
                 </div>
@@ -1430,10 +1484,13 @@ export default function Home() {
 
             <section className="workspace-grid" id="arrival">
                 <aside className="setup-panel panel">
-                    <div className="panel-kicker">
+                    <details className="sidebar-details" open>
+                    <summary className="panel-kicker sidebar-summary">
                         <span>01</span>
-                        <span>Arrival gate</span>
-                    </div>
+                        <span>Vehicle & station controls</span>
+                        <i aria-hidden="true">⌄</i>
+                    </summary>
+                    <div className="sidebar-content">
                     <div className="panel-heading">
                         <div>
                             <h2>New simulated vehicle</h2>
@@ -1521,19 +1578,24 @@ export default function Home() {
                         </div>
                         {siteSaveMessage ? <p className="save-message">{siteSaveMessage}</p> : null}
                     </form>
+                    </div>
+                    </details>
                 </aside>
 
                 <section className="chargers-panel">
-                    <div className="section-heading">
-                        <div>
-                            <p className="eyebrow">02 · Live fleet</p>
-                            <h2>Charger simulator</h2>
-                        </div>
+                    <details className="sidebar-details" open>
+                    <summary className="section-heading sidebar-summary">
+                        <span className="sidebar-title">
+                            <span className="eyebrow">02 · Live fleet</span>
+                            <strong>Charger simulator</strong>
+                        </span>
                         <span className="live-label">
                             <span className="status-dot" />
                             {parkedChargers.length} parked vehicle{parkedChargers.length === 1 ? "" : "s"}
                         </span>
-                    </div>
+                    <i aria-hidden="true">⌄</i>
+                    </summary>
+                    <div className="fleet-content">
 
                     {parkedChargers.length === 0 ? (
                         <div className="empty-state">
@@ -1567,7 +1629,13 @@ export default function Home() {
                                         <div>
                                             <div className="card-title-row">
                                                 <span className={`charger-status-dot status-${charger.status.toLowerCase()}`} />
-                                                <span className="card-status">{charger.status}</span>
+                                                <span className="card-status">
+                                                    {charger.status === "Charging" &&
+                                                    charger.requestedPowerKw > 0 &&
+                                                    (baselinePowerById.get(charger.id) ?? 0) === 0
+                                                        ? "Waiting for power"
+                                                        : charger.status}
+                                                </span>
                                             </div>
                                             <h3>{charger.id}</h3>
                                         </div>
@@ -1649,6 +1717,8 @@ export default function Home() {
                             ))}
                         </div>
                     )}
+                    </div>
+                    </details>
                 </section>
             </section>
 
