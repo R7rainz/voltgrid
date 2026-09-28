@@ -18,6 +18,9 @@ Show the supervisor:
    invoice are durable records.
 9. Start all four sessions at a `100 kW` site. Show the unmanaged first-come
    result: `50 kW`, `50 kW`, `0 kW`, `0 kW`, with `100 kW` unmet demand.
+   Requests are granted whole or not at all; with three `40 kW` cars the
+   result is `40 kW`, `40 kW`, `0 kW`, leaving `20 kW` unused and one full
+   request unmet. The Go allocator remains unused in Phase 1.
 
 The key claim for Phase 1 is: VoltGrid can manage multiple simulated chargers,
 charging sessions, meter readings, and billing without physical vehicle

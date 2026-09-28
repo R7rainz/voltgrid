@@ -16,7 +16,7 @@ test("first arrivals consume the Phase 1 site capacity", () => {
     expect([...allocations.values()].reduce((total, power) => total + power, 0)).toBe(100);
 });
 
-test("applies each charging vehicle's own power request", () => {
+test("does not partially serve a request that exceeds the remaining site power", () => {
     const allocations = allocateFirstComePower(
         [70, 50, 40].map((requestedPowerKw, index) => ({
             id: `car-${index + 1}`,
@@ -26,5 +26,19 @@ test("applies each charging vehicle's own power request", () => {
         100,
     );
 
-    expect([...allocations.values()]).toEqual([70, 30, 0]);
+    expect([...allocations.values()]).toEqual([70, 0, 0]);
+});
+
+test("three 40 kW requests at a 100 kW site leave the third car waiting", () => {
+    const allocations = allocateFirstComePower(
+        [1, 2, 3].map((number) => ({
+            id: `car-${number}`,
+            status: "Charging",
+            requestedPowerKw: 40,
+        })),
+        100,
+    );
+
+    expect([...allocations.values()]).toEqual([40, 40, 0]);
+    expect([...allocations.values()].reduce((total, power) => total + power, 0)).toBe(80);
 });

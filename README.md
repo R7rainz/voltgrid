@@ -77,6 +77,9 @@ For the capacity demonstration, add four cars and start their demos together.
 At the default `100 kW` site limit, each car requests `50 kW`. The unmanaged
 Phase 1 baseline gives the first two cars `50 kW` each and leaves the later two
 at `0 kW`, making the need for Phase 2 smart allocation visible.
+Requests are all-or-nothing: at a `100 kW` site, three `40 kW` requests receive
+`40`, `40`, and `0 kW`; the remaining `20 kW` is unused because it cannot meet
+the third car's full request. The Go allocator is not called in Phase 1.
 
 ## Documentation
 
