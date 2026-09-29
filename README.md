@@ -23,33 +23,80 @@ load-balancer/    Go site-power allocation service
 docs/             Architecture and supervisor demo plan
 ```
 
-## Run everything with Docker
+## Run locally with Docker
 
-Install Docker Engine with Docker Compose, then run this once from the
-repository root:
+### Prerequisites
+
+- Git
+- Docker Desktop, or Docker Engine with Docker Compose v2
+
+No local Bun, Node.js, Go, or PostgreSQL installation is required for the
+Phase 1 demo.
+
+### 1. Get the project
 
 ```sh
-docker compose up --build
+git clone https://github.com/R7rainz/voltgrid.git
+cd voltgrid
 ```
 
-Compose builds and starts PostgreSQL, the Bun/Hono CSMS, and the Next.js
-dashboard. When every service is healthy, the terminal prints
-a `VOLTGRID IS READY` banner containing these links:
+If the repository is already cloned, open a terminal in its root directory.
 
-- Dashboard: `http://localhost:9000`
-- CSMS health: `http://localhost:6773/healthz`
-- OCPP WebSocket: `ws://localhost:6773/ocpp/{chargerId}`
+### 2. Build and start the application
+
+```sh
+docker compose up --build -d
+```
+
+Docker Compose builds the dashboard and CSMS, starts PostgreSQL, waits for the
+services to become healthy, and keeps them running in the background. The
+first build can take a few minutes.
+
+Check the service status and print the startup links:
+
+```sh
+docker compose ps
+docker compose logs info
+```
+
+Every service should show `healthy`. Open:
+
+- Dashboard and charger simulator: `http://localhost:9000`
+- CSMS health endpoint: `http://localhost:6773/healthz`
+- OCPP WebSocket endpoint: `ws://localhost:6773/ocpp/{chargerId}`
 - PostgreSQL: `localhost:5433`
 
-Press `Ctrl+C` to stop the foreground logs. Remove the containers afterward
-with:
+The default local database is created automatically and persists in the
+`voltgrid_postgres_data` Docker volume.
+
+### 3. View logs
+
+```sh
+docker compose logs -f csms dashboard
+```
+
+Press `Ctrl+C` to stop following the logs; the containers continue running.
+
+### 4. Stop or reset VoltGrid
+
+Stop the application without deleting database data:
 
 ```sh
 docker compose down
 ```
 
-To run in the background instead, use `docker compose up --build -d`, followed
-by `docker compose logs info` to print the same link banner.
+Delete the local database and start again from a clean state:
+
+```sh
+docker compose down --volumes
+docker compose up --build -d
+```
+
+After pulling code changes, run `docker compose up --build -d` again to rebuild
+and replace the affected containers.
+
+If startup fails, use `docker compose ps` and `docker compose logs` to inspect
+the error. Ensure ports `9000`, `6773`, and `5433` are not already in use.
 
 ## Quick checks
 
