@@ -3,6 +3,7 @@ const chargerId = Bun.env.CHARGER_ID ?? "sim-charger-001";
 const connectorId = Number(Bun.env.CONNECTOR_ID ?? 1);
 const idTag = Bun.env.ID_TAG ?? "SIM-DRIVER-001";
 const responseTimeoutMs = Number(Bun.env.SIMULATOR_TIMEOUT_MS ?? 30_000);
+const requestedPowerKw = Number(Bun.env.SIMULATOR_POWER_KW ?? 50);
 const apiUrl = Bun.env.CSMS_HTTP_URL ?? `http://localhost:${port}`;
 const socketUrl = Bun.env.CSMS_WS_URL ?? `ws://localhost:${port}`;
 
@@ -20,6 +21,10 @@ if (!Number.isInteger(connectorId) || connectorId < 1) {
 
 if (!Number.isFinite(responseTimeoutMs) || responseTimeoutMs < 1) {
     throw new Error("SIMULATOR_TIMEOUT_MS must be a positive number");
+}
+
+if (!Number.isFinite(requestedPowerKw) || requestedPowerKw < 0) {
+    throw new Error("SIMULATOR_POWER_KW must be non-negative");
 }
 
 type PendingRequest = {
@@ -80,6 +85,22 @@ socket.onmessage = (event) => {
 
     const [messageType, uniqueId, payload] = message;
 
+    if (messageType === 2 && typeof uniqueId === "string" && payload === "SetChargingProfile") {
+        const profile = message[3];
+        const watts = isObject(profile) && isObject(profile.csChargingProfiles) &&
+            isObject(profile.csChargingProfiles.chargingSchedule) &&
+            Array.isArray(profile.csChargingProfiles.chargingSchedule.chargingSchedulePeriod)
+            ? profile.csChargingProfiles.chargingSchedule.chargingSchedulePeriod[0]?.limit
+            : undefined;
+        if (typeof watts === "number" && Number.isFinite(watts) && watts >= 0) {
+            console.log(`Go allocation applied: ${watts / 1000} kW`);
+            socket.send(JSON.stringify([3, uniqueId, { status: "Accepted" }]));
+        } else {
+            socket.send(JSON.stringify([4, uniqueId, "PropertyConstraintViolation", "Invalid profile", {}]));
+        }
+        return;
+    }
+
     if ((messageType !== 3 && messageType !== 4) || typeof uniqueId !== "string") {
         return;
     }
@@ -134,6 +155,15 @@ async function runSimulation() {
         status: "Available",
         errorCode: "NoError",
     });
+
+    const demandResponse = await call("DataTransfer", {
+        vendorId: "VoltGrid",
+        messageId: "PowerRequest",
+        data: JSON.stringify({ requestedPowerKw }),
+    });
+    if (!isObject(demandResponse) || demandResponse.status !== "Accepted") {
+        throw new Error("Power request was rejected");
+    }
 
     await call("StatusNotification", {
         connectorId,
