@@ -9,6 +9,8 @@ export type ChargerState = {
     chargerId: string;
     connected: boolean;
     lastSeenAt: string;
+    allocatedPowerKw: number;
+    requestedPowerKw?: number;
     connectors: Record<string, ConnectorState>;
 };
 
@@ -26,6 +28,7 @@ export function getOrCreateCharger(chargerId: string) {
             chargerId,
             connected: false,
             lastSeenAt: now(),
+            allocatedPowerKw: 0,
             connectors: {},
         };
 
@@ -57,7 +60,27 @@ export function markChargerDisconnected(chargerId: string) {
 
     charger.connected = false;
     charger.lastSeenAt = now();
+    charger.allocatedPowerKw = 0;
 
+    return charger;
+}
+
+export function updateChargerAllocation(
+    chargerId: string,
+    allocatedPowerKw: number,
+) {
+    const charger = getOrCreateCharger(chargerId);
+
+    charger.allocatedPowerKw = allocatedPowerKw;
+    charger.lastSeenAt = now();
+
+    return charger;
+}
+
+export function updateChargerDemand(chargerId: string, requestedPowerKw: number) {
+    const charger = getOrCreateCharger(chargerId);
+    charger.requestedPowerKw = requestedPowerKw;
+    charger.lastSeenAt = now();
     return charger;
 }
 
