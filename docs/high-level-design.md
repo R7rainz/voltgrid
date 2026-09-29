@@ -20,7 +20,7 @@ charger-to-CSMS flow that a physical charger would use.
 | PostgreSQL persistence through Prisma ORM Next | Implemented in Phase 1 |
 | Next.js operator dashboard and charger simulator | Implemented in Phase 1 |
 | Go load-balancer decision service | Implemented as a Phase 2 service |
-| Applying calculated power limits through outbound charger messages | Phase 2 target/demo capability |
+| Applying calculated power limits through outbound charger messages | Implemented for the Phase 2 simulator |
 | Redis live-state and pub/sub layer | Planned; not required for the current demo |
 | Physical charger control and payment settlement | Out of scope for v1 |
 
@@ -162,7 +162,8 @@ CSMS restart:
 - `Charger`: charge-point identity, site relation, connection metadata, and
   last-seen time.
 - `Connector`: connector number, availability, and error code.
-- `OcppMessage`: inbound message traceability and duplicate protection.
+- `OcppMessage`: inbound message traceability, duplicate protection, and
+  acknowledged outbound charging profiles for incident replay.
 - `ChargingSession`: transaction lifecycle and meter boundaries.
 - `MeterReading`: cumulative energy readings for a session.
 - `Invoice`: tariff snapshot, energy, amount, currency, and status.
@@ -242,7 +243,7 @@ surface includes:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/health` or `/healthz` | CSMS health check |
-| `GET` | `/api/chargers` | Read persisted charger summaries |
+| `GET` | `/api/chargers` | Read live in-process charger state |
 | `GET` | `/api/site` | Read current site configuration |
 | `PATCH` | `/api/site` | Update site power limit and tariff |
 | `GET` | `/api/sessions/:transactionId/invoice` | Read a generated invoice |
@@ -296,8 +297,8 @@ Response:
 }
 ```
 
-The request is a decision input, not a command to hardware. Hono owns the
-subsequent outbound charger message in the Phase 2 design.
+The request is a decision input, not a command to hardware. Hono sends the
+result as an outbound `SetChargingProfile` call to the connected simulator.
 
 ## 7. Smart load-balancing design
 
@@ -310,8 +311,10 @@ For each rebalance, Hono supplies:
 - Each charger’s current requested power.
 - Each charger’s maximum permitted power.
 
-The current demo uses the configured maximum charger power as the simulator’s
-request and maximum. Per-charger limits can be made configurable later.
+The browser simulator sends its per-car power request in a VoltGrid
+`DataTransfer` message. A configured default is used only if no request is
+available. The requested and maximum values in the Go contract are currently
+the same; physical charger limits are not discovered by this demo.
 
 ### 7.2 Algorithm
 
@@ -346,6 +349,13 @@ Hono triggers a new calculation when an active session starts or stops, a
 charger disconnects, or the site power limit changes. In the Phase 2 simulator
 demo, Hono sends each successful allocation back as an outbound charging
 profile call and the simulator acknowledges/displays the applied value.
+Connector fault and recovery reports also trigger recalculation. A faulted
+connector remains in the allocation input with a `0 kW` target, so Hono sends
+and awaits that reduction before increasing other chargers. Fault-time meter
+increments are rejected. The VoltGrid Black Box reads the latest incident's
+stored status reports and acknowledged charging profiles as a read-only replay;
+it does not issue control commands. These are simulator guarantees, not proof
+of behavior on physical hardware.
 
 ## 8. State and data ownership
 
@@ -481,6 +491,8 @@ Demonstrate:
 - Fair allocation with total power at or below site capacity.
 - Rebalancing after session, disconnect, or capacity changes.
 - Simulator acknowledgement and display of the applied limit.
+- Simulated connector fault isolation, safe reallocation, recovery, and a
+  durable operator-facing incident replay without fault-time billable energy.
 - Full local startup through Docker Compose.
 
 Phase 2 acceptance statement:

@@ -1,0 +1,39 @@
+graph TD
+
+    user[Operator or Driver]
+    charger[Physical or Simulated Charger]
+
+    subgraph presentation[Presentation Layer]
+        dashboard[Next.js Dashboard Port 9000]
+        simulator[Browser Charger Simulator]
+    end
+
+    subgraph backend[CSMS Backend]
+        csms[Hono and Bun CSMS Port 6773]
+        ocpp[OCPP Message Handler]
+        sessions[Sessions Billing and Monitoring]
+    end
+
+    subgraph services[Supporting Services]
+        database[PostgreSQL and Prisma ORM]
+        balancer[Go Load Balancer Port 8787]
+        redis[Redis Planned]
+    end
+
+    user --> dashboard
+    dashboard -->|HTTP API| csms
+    dashboard -->|Controls| simulator
+    simulator -->|OCPP WebSocket| csms
+    charger -->|OCPP WebSocket| csms
+
+    csms --> ocpp
+    csms --> sessions
+    ocpp -->|Store charger events| database
+    sessions -->|Store sessions invoices and meter readings| database
+
+    csms -->|POST v1 allocate| balancer
+    balancer -->|Power allocation result| csms
+
+    csms -->|Live WebSocket updates| dashboard
+    csms -->|Charging profile command| simulator
+    csms -.->|Future live state and pub sub| redis
