@@ -146,6 +146,7 @@ keep multiple sessions open while explaining live balancing.
 
 ## Documentation
 
+- [Detailed Phase 2 implementation and evidence](docs/phase-2-implementation.md)
 - [High-level design](docs/high-level-design.md)
 - [Architecture](docs/architecture.md)
 - [Phase demo plan](docs/demo-phases.md)
