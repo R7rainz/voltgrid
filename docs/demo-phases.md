@@ -26,21 +26,41 @@ The key claim for Phase 1 is: VoltGrid can manage multiple simulated chargers,
 charging sessions, meter readings, and billing without physical vehicle
 hardware, while clearly demonstrating why smart load balancing is required.
 
-## Phase 2: smart charging
+## Phase 2: smart charging (this branch)
 
 Show the supervisor:
 
-1. Start the Go service and open its health endpoint.
-2. Run two or more active sessions in the same site.
-3. Explain that Hono reads `Site.powerLimitKw` from PostgreSQL.
-4. Show Hono calling the Go `/v1/allocate` contract.
-5. Use a simple example such as a `100 kW` site with two chargers requesting
-   `80 kW` each; the allocator returns `50 kW` each and `100 kW` total.
-6. Repeat after one charger stops and show that the active set is recalculated.
+1. Run `docker compose up --build -d` and verify the Go service at
+   `http://localhost:8787/health`.
+2. Add three cars requesting `40 kW` each and start their sessions manually.
+3. Show that Hono reads the `100 kW` site capacity from PostgreSQL, sends
+   active demands to Go `/v1/allocate`, then sends each returned limit to the
+   simulated charger with `SetChargingProfile`.
+4. All three cards should settle near `33.33 kW`; together they stay under
+   `100 kW`. This differs from Phase 1's `40`, `40`, `0 kW` baseline.
+5. Change a car's demand or the site capacity and show another live
+   recalculation; restore the three `40 kW` requests at a `100 kW` site.
+6. For the **VoltGrid Black Box** scenario, keep all three sessions open
+   and press **Inject fault** on one car. Its simulator sends OCPP
+   `StatusNotification(Faulted, PowerSwitchFailure)`. The CSMS targets `0 kW`
+   for that connector before raising the healthy chargers to `40 kW` each.
+   Meter readings reported during the fault are rejected, so they do not
+   increase billable energy. Press **Recover charger** to report `Charging`
+   with `NoError`; all three shares return to about `33.33 kW`.
+7. Select the faulted car and use **Replay**, **Next**, and **Latest** in the
+   Black Box panel. The read-only timeline comes from durable OCPP status
+   messages and acknowledged outbound charging profiles in PostgreSQL. It
+   does not resend commands or alter a session.
+8. Stop one session and show the remaining two rise to `40 kW` each. Add meter
+   values, stop the remaining sessions, and show the invoices. The payment
+   button is a mock UI confirmation, not a payment-gateway charge.
 
-Phase 2 will replace the intentionally unfair first-come baseline with a fair
-allocation decision and send the result to each connected charger through an
-outbound OCPP charging-profile command.
+The browser represents chargers rather than physical vehicles. The charging
+profiles are acknowledged by this simulator; real charger compatibility and
+electrical enforcement are not claimed.
+The injected fault and recovery are simulator actions, not hardware diagnostics
+or automatic repair. The CSMS will not increase other cars' profiles if the
+faulted charger fails to acknowledge the 0 kW profile.
 
 ## Questions to prepare for
 

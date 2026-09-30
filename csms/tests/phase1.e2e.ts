@@ -30,6 +30,10 @@ class OcppClient {
             }
 
             const frame = JSON.parse(event.data) as OcppFrame;
+            if (frame[0] === 2 && frame[2] === "SetChargingProfile") {
+                this.socket.send(JSON.stringify([3, frame[1], { status: "Accepted" }]));
+                return;
+            }
             const request = this.pending.get(frame[1]);
 
             if (!request) {
@@ -114,15 +118,15 @@ class OcppClient {
     }
 }
 
-phase1("Phase 1 end-to-end", () => {
+phase1("CSMS end-to-end", () => {
     let csms: BunServer;
-    let allocator: BunServer;
+    let allocator: BunServer | undefined;
     let db: Database;
     let httpUrl: string;
     let websocketUrl: string;
 
     beforeAll(async () => {
-        allocator = Bun.serve({
+        if (process.env.PHASE2_REAL_ALLOCATOR !== "1") allocator = Bun.serve({
             hostname: "127.0.0.1",
             port: 0,
             async fetch(request) {
@@ -158,7 +162,8 @@ phase1("Phase 1 end-to-end", () => {
             },
         });
 
-        process.env.LOAD_BALANCER_URL = `http://127.0.0.1:${allocator.port}`;
+        if (allocator) process.env.LOAD_BALANCER_URL = `http://127.0.0.1:${allocator.port}`;
+        else if (!process.env.LOAD_BALANCER_URL) throw new Error("LOAD_BALANCER_URL is required for the real Go integration test");
         process.env.CHARGER_MAX_POWER_KW = "50";
 
         const [{ app }, { websocket }, database] = await Promise.all([
@@ -572,4 +577,140 @@ phase1("Phase 1 end-to-end", () => {
             );
         }
     });
+
+    test("rebalances three chargers, isolates a fault, and resumes without phantom energy", async () => {
+        const clients: OcppClient[] = [];
+        const ids: string[] = [];
+        const transactions: number[] = [];
+        try {
+            for (let index = 0; index < 3; index += 1) {
+                const chargerId = `balance-${crypto.randomUUID()}`;
+                ids.push(chargerId);
+                const client = await OcppClient.connect(`${websocketUrl}/ocpp/${chargerId}`);
+                clients.push(client);
+                await client.call("BootNotification", {
+                    chargePointVendor: "VoltGrid Tests",
+                    chargePointModel: "Balancing Charger",
+                });
+                await client.call("StatusNotification", {
+                    connectorId: 1, status: "Available", errorCode: "NoError",
+                });
+                expect((await client.call("DataTransfer", {
+                    vendorId: "VoltGrid",
+                    messageId: "PowerRequest",
+                    data: JSON.stringify({ requestedPowerKw: 40 }),
+                }))[2]).toEqual({ status: "Accepted" });
+                const start = await client.call("StartTransaction", {
+                    connectorId: 1,
+                    idTag: `BALANCE-${index}-${crypto.randomUUID()}`,
+                    meterStart: 100_000,
+                    timestamp: new Date().toISOString(),
+                });
+                transactions.push((start[2] as { transactionId: number }).transactionId);
+            }
+
+            const allocations = async () => {
+                const response = await fetch(`${httpUrl}/api/chargers`);
+                const body = await response.json() as {
+                    chargers: Array<{ chargerId: string; allocatedPowerKw: number }>;
+                };
+                return ids.map((id) => body.chargers.find((charger) => charger.chargerId === id)?.allocatedPowerKw ?? 0);
+            };
+            const waitFor = async (expected: number[]) => {
+                for (let attempt = 0; attempt < 100; attempt += 1) {
+                    const actual = await allocations();
+                    if (actual.every((power, index) => Math.abs(power - expected[index]) < 0.01)) return actual;
+                    await Bun.sleep(50);
+                }
+                throw new Error(`Timed out waiting for ${expected}; got ${await allocations()}`);
+            };
+
+            const initial = await waitFor([33.333, 33.333, 33.333]);
+            expect(initial.reduce((sum, power) => sum + power, 0)).toBeLessThanOrEqual(100);
+
+            const updateSite = async (powerLimitKw: number) => {
+                const response = await fetch(`${httpUrl}/api/site`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ powerLimitKw, tariffPaisePerKwh: 800 }),
+                });
+                expect(response.status).toBe(200);
+            };
+            await updateSite(60);
+            const reduced = await waitFor([20, 20, 20]);
+            expect(reduced.reduce((sum, power) => sum + power, 0)).toBeLessThanOrEqual(60);
+            await updateSite(100);
+            await waitFor([33.333, 33.333, 33.333]);
+
+            await clients[0].call("DataTransfer", {
+                vendorId: "VoltGrid",
+                messageId: "PowerRequest",
+                data: JSON.stringify({ requestedPowerKw: 20 }),
+            });
+            await waitFor(process.env.PHASE2_REAL_ALLOCATOR === "1"
+                ? [20, 40, 40] : [20, 33.333, 33.333]);
+            await clients[0].call("DataTransfer", {
+                vendorId: "VoltGrid",
+                messageId: "PowerRequest",
+                data: JSON.stringify({ requestedPowerKw: 40 }),
+            });
+            await waitFor([33.333, 33.333, 33.333]);
+
+            expect((await clients[2].call("StatusNotification", {
+                connectorId: 1, status: "Faulted", errorCode: "PowerSwitchFailure",
+            }))[0]).toBe(3);
+            await waitFor(process.env.PHASE2_REAL_ALLOCATOR === "1"
+                ? [40, 40, 0] : [33.333, 33.333, 0]);
+
+            const badReading = await clients[2].call("MeterValues", {
+                connectorId: 1,
+                transactionId: transactions[2],
+                meterValue: [{ timestamp: new Date().toISOString(), sampledValue: [
+                    { value: "101000", unit: "Wh", measurand: "Energy.Active.Import.Register" },
+                ] }],
+            });
+            expect(badReading[0]).toBe(4);
+            const faultedSession = await db.orm.public.ChargingSession
+                .select("lastMeterWh").where({ transactionId: transactions[2] }).first();
+            expect(faultedSession?.lastMeterWh).toBe(100_000);
+            expect((await clients[2].call("StopTransaction", {
+                transactionId: transactions[2], meterStop: 101_000,
+                timestamp: new Date().toISOString(), reason: "Local",
+            }))[2]).toMatchObject({ idTagInfo: { status: "Invalid" } });
+            expect((await db.orm.public.ChargingSession.select("status")
+                .where({ transactionId: transactions[2] }).first())?.status).toBe("Active");
+
+            expect((await clients[2].call("StatusNotification", {
+                connectorId: 1, status: "Charging", errorCode: "NoError",
+            }))[0]).toBe(3);
+            await waitFor([33.333, 33.333, 33.333]);
+
+            let events: Array<{ kind: string; text: string }> = [];
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+                const response = await fetch(`${httpUrl}/api/chargers/${ids[2]}/black-box`);
+                events = (await response.json() as { events: typeof events }).events;
+                if (events.some((event) => event.kind === "recovery") &&
+                    events.some((event) => event.kind === "profile" && event.text.includes("0 kW")) &&
+                    events.some((event) => event.kind === "profile" && event.text.includes("33.333 kW"))) break;
+                await Bun.sleep(50);
+            }
+            expect(events.map((event) => event.kind)).toContain("fault");
+            expect(events.some((event) => event.text.includes("0 kW"))).toBe(true);
+            expect(events.some((event) => event.kind === "recovery")).toBe(true);
+            expect(events.findIndex((event) => event.kind === "fault"))
+                .toBeLessThan(events.findIndex((event) => event.text.includes("0 kW")));
+            expect(events.findIndex((event) => event.text.includes("0 kW")))
+                .toBeLessThan(events.findIndex((event) => event.kind === "recovery"));
+
+            await clients[2].call("StopTransaction", {
+                transactionId: transactions[2], meterStop: 100_000,
+                timestamp: new Date().toISOString(), reason: "Local",
+            });
+            const invoice = await fetch(`${httpUrl}/api/sessions/${transactions[2]}/invoice`);
+            expect((await invoice.json() as { invoice: { energyWh: number } }).invoice.energyWh).toBe(0);
+            await waitFor([40, 40, 0]);
+        } finally {
+            await Promise.all(clients.map((client) => client.close()));
+        }
+    }, 30_000);
 });

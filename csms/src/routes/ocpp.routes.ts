@@ -4,8 +4,16 @@ import {
     markChargerConnected,
     markChargerDisconnected,
     markChargerSeen,
+    updateChargerAllocation,
     updateConnectorStatus,
+    updateChargerDemand,
 } from "../modules/chargers/charger-state";
+import {
+    registerChargerSocket,
+    resolveChargerCall,
+    unregisterChargerSocket,
+} from "../modules/chargers/charger-connections";
+import { rebalanceSite } from "../modules/load-balancer/load-balancer-client";
 import { db } from "../infrastructure/database/db";
 import type { JsonValue } from "@prisma/orm-postgres/target/codec-types";
 
@@ -113,6 +121,25 @@ function sendCallError(
     ws.send(JSON.stringify([4, uniqueId, errorCode, description, {}]));
 }
 
+async function markChargerOffline(chargerId: string) {
+    try {
+        const charger = await db.orm.public.Charger.select("id", "siteId")
+            .where({ chargePointId: chargerId })
+            .first();
+
+        if (!charger) {
+            return;
+        }
+
+        await db.orm.public.Charger.where({ id: charger.id }).update({
+            connected: false,
+        });
+        void rebalanceSite(charger.siteId);
+    } catch (error) {
+        console.error(`Failed to mark charger ${chargerId} offline:`, error);
+    }
+}
+
 ocppRoutes.get(
     "/ocpp/:chargerId",
     upgradeWebSocket((c) => {
@@ -121,6 +148,7 @@ ocppRoutes.get(
 
         return {
             onOpen(_event, ws) {
+                registerChargerSocket(String(chargerId), ws);
                 markChargerConnected(String(chargerId));
                 console.log(`Charger connected: ${chargerId}`);
             },
@@ -145,6 +173,11 @@ ocppRoutes.get(
                 }
 
                 const [messageType, uniqueId, action, payload] = message;
+
+                if (messageType === 3 || messageType === 4) {
+                    resolveChargerCall(String(chargerId), message);
+                    return;
+                }
 
                 if (message.length !== 4) {
                     console.log("Invalid OCPP Call length");
@@ -258,6 +291,7 @@ ocppRoutes.get(
                         const persisted = await db.transaction(async (tx) => {
                             const charger = await tx.orm.public.Charger.select(
                                 "id",
+                                "siteId",
                             )
                                 .where({ chargePointId: String(chargerId) })
                                 .first();
@@ -309,7 +343,7 @@ ocppRoutes.get(
                                 },
                             });
 
-                            return true;
+                            return charger.siteId;
                         });
 
                         if (!persisted) {
@@ -338,6 +372,9 @@ ocppRoutes.get(
                         console.log(`Charger error code: ${errorCode}`);
 
                         ws.send(JSON.stringify([3, uniqueId, {}]));
+                        if (connectorId > 0) {
+                            void rebalanceSite(persisted);
+                        }
                     } catch (error) {
                         console.error(
                             `Failed to persist status for charger ${chargerId}:`,
@@ -497,6 +534,45 @@ ocppRoutes.get(
                     return;
                 }
 
+                if (action === "DataTransfer") {
+                    if (!isJsonObject(payload) || payload.vendorId !== "VoltGrid" ||
+                        payload.messageId !== "PowerRequest" || typeof payload.data !== "string") {
+                        sendCallError(ws, uniqueId, "PropertyConstraintViolation", "Expected VoltGrid PowerRequest data");
+                        return;
+                    }
+
+                    let demand: unknown;
+                    try {
+                        demand = JSON.parse(payload.data);
+                    } catch {
+                        sendCallError(ws, uniqueId, "FormationViolation", "PowerRequest data must be JSON");
+                        return;
+                    }
+
+                    const requestedPowerKw = isJsonObject(demand) ? demand.requestedPowerKw : undefined;
+                    if (typeof requestedPowerKw !== "number" || !Number.isFinite(requestedPowerKw) || requestedPowerKw < 0) {
+                        sendCallError(ws, uniqueId, "PropertyConstraintViolation", "requestedPowerKw must be non-negative");
+                        return;
+                    }
+
+                    try {
+                        const charger = await db.orm.public.Charger.select("siteId")
+                            .where({ chargePointId: String(chargerId) }).first();
+                        if (!charger) {
+                            sendCallError(ws, uniqueId, "SecurityError", "Charger is not registered");
+                            return;
+                        }
+
+                        updateChargerDemand(String(chargerId), requestedPowerKw);
+                        ws.send(JSON.stringify([3, uniqueId, { status: "Accepted" }]));
+                        void rebalanceSite(charger.siteId);
+                    } catch (error) {
+                        console.error(`Failed to record power request from ${chargerId}:`, error);
+                        sendCallError(ws, uniqueId, "GenericError", "Could not record power request");
+                    }
+                    return;
+                }
+
                 if (action === "StartTransaction") {
                     if (!isJsonObject(payload)) {
                         console.log("Invalid StartTransaction payload");
@@ -569,14 +645,15 @@ ocppRoutes.get(
                                     .first();
 
                             const connector =
-                                await tx.orm.public.Connector.select("id")
+                                await tx.orm.public.Connector.select("id", "status", "errorCode")
                                     .where({
                                         chargerId: charger.id,
                                         connectorNumber: connectorId,
                                     })
                                     .first();
 
-                            if (!connector) {
+                            if (!connector || connector.status === "Faulted" ||
+                                connector.status === "Unavailable" || connector.errorCode !== "NoError") {
                                 return {
                                     status: "Invalid" as const,
                                     transactionId: 0,
@@ -727,6 +804,10 @@ ocppRoutes.get(
                         console.log(
                             `StartTransaction ${result.status.toLowerCase()} for ${chargerId}`,
                         );
+
+                        if (result.status !== "Invalid") {
+                            void rebalanceSite(result.siteId);
+                        }
 
                     } catch (error) {
                         console.error(
@@ -904,6 +985,19 @@ ocppRoutes.get(
                                 return repeatedMessage.action === action;
                             }
 
+                            const connector =
+                                await tx.orm.public.Connector.select("id", "status", "errorCode")
+                                    .where({
+                                        chargerId: charger.id,
+                                        connectorNumber: connectorId,
+                                    })
+                                    .first();
+
+                            if (!connector || connector.status === "Faulted" ||
+                                connector.status === "Unavailable" || connector.errorCode !== "NoError") {
+                                return false;
+                            }
+
                             await tx.orm.public.OcppMessage.upsert({
                                 conflictOn: {
                                     chargerId: charger.id,
@@ -922,18 +1016,6 @@ ocppRoutes.get(
                                     payload: payload as JsonValue,
                                 },
                             });
-
-                            const connector =
-                                await tx.orm.public.Connector.select("id")
-                                    .where({
-                                        chargerId: charger.id,
-                                        connectorNumber: connectorId,
-                                    })
-                                    .first();
-
-                            if (!connector) {
-                                return false;
-                            }
 
                             const session =
                                 await tx.orm.public.ChargingSession.select(
@@ -1130,6 +1212,8 @@ ocppRoutes.get(
                             const connector =
                                 await tx.orm.public.Connector.select(
                                     "connectorNumber",
+                                    "status",
+                                    "errorCode",
                                 )
                                     .where({ id: session.connectorId })
                                     .first();
@@ -1138,6 +1222,11 @@ ocppRoutes.get(
                                 return {
                                     status: "Invalid" as const,
                                 };
+                            }
+
+                            if ((connector.status === "Faulted" || connector.status === "Unavailable" ||
+                                connector.errorCode !== "NoError") && meterStop > previousMeterWh) {
+                                return { status: "Invalid" as const };
                             }
 
                             if (session.status !== "Active") {
@@ -1256,6 +1345,11 @@ ocppRoutes.get(
                             `StopTransaction ${result.status.toLowerCase()} for ${chargerId}`,
                         );
 
+                        if (result.status === "Accepted") {
+                            updateChargerAllocation(String(chargerId), 0);
+                            void rebalanceSite(result.siteId);
+                        }
+
                     } catch (error) {
                         console.error(
                             `Failed to stop transaction for charger ${chargerId}:`,
@@ -1281,8 +1375,10 @@ ocppRoutes.get(
                 );
             },
 
-            onClose() {
+            onClose(_event, ws) {
+                if (!unregisterChargerSocket(String(chargerId), ws)) return;
                 markChargerDisconnected(String(chargerId));
+                void markChargerOffline(String(chargerId));
                 console.log(`Charger disconnected: ${chargerId}`);
             },
 

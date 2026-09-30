@@ -545,14 +545,14 @@ button:disabled {
     gap: 3px;
     margin: 0 10px 8px;
     padding: 9px 10px;
-    color: #503c22;
-    border: 1px solid #e0a04b;
+    color: #234430;
+    border: 1px solid #9ac8a9;
     border-radius: 9px;
-    background: #fff8e8;
+    background: #edf8f0;
 }
 
 .station-power-message > span {
-    color: #a64c24;
+    color: var(--green);
     font-size: 9px;
     font-weight: 850;
     letter-spacing: 0.05em;
@@ -569,10 +569,23 @@ button:disabled {
     line-height: 1.35;
 }
 
-.station-power-message small {
-    color: #765b36;
-    font-size: 9px;
-    line-height: 1.35;
+.station-power-message label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 10px;
+    font-weight: 750;
+}
+
+.station-power-message input {
+    width: 74px;
+    min-width: 0;
+    padding: 4px 6px;
+    border: 1px solid #9ac8a9;
+    border-radius: 6px;
+    background: #fff;
+    font-size: 12px;
 }
 
 .metric-row {
@@ -929,7 +942,7 @@ button:disabled {
     animation: topdown-arrival 4.2s cubic-bezier(0.3, 0.66, 0.36, 1) both;
 }
 
-.bay-power-error {
+.bay-power-share {
     position: absolute;
     z-index: 7;
     top: 62px;
@@ -939,14 +952,14 @@ button:disabled {
     gap: 2px;
     padding: 7px 8px;
     color: var(--ink);
-    border: 2px solid #d27b2d;
+    border: 2px solid #75b88b;
     border-radius: 10px;
-    background: #fff8e8;
+    background: #f2fbf4;
     box-shadow: 0 5px 14px rgba(92, 31, 27, 0.25);
     text-align: center;
 }
 
-.bay-power-error::after {
+.bay-power-share::after {
     position: absolute;
     bottom: -9px;
     left: 50%;
@@ -954,27 +967,52 @@ button:disabled {
     height: 14px;
     content: "";
     transform: translateX(-50%) rotate(45deg);
-    border-right: 2px solid #d27b2d;
-    border-bottom: 2px solid #d27b2d;
-    background: #fff8e8;
+    border-right: 2px solid #75b88b;
+    border-bottom: 2px solid #75b88b;
+    background: #f2fbf4;
 }
 
-.bay-power-error strong {
-    color: #a64c24;
-    font-size: 10px;
+.bay-power-share strong {
+    color: var(--green-dark);
+    font-size: 11px;
     letter-spacing: 0.05em;
 }
 
-.bay-power-error > span {
-    font-size: 11px;
-    font-weight: 750;
+.bay-power-share small {
+    color: #426b4d;
+    font-size: 10px;
     line-height: 1.25;
 }
 
-.bay-power-error small {
-    color: #73532c;
-    font-size: 9px;
-    line-height: 1.25;
+.bay-power-share > i {
+    display: block;
+    height: 5px;
+    overflow: hidden;
+    border-radius: 99px;
+    background: #d2e8d8;
+}
+
+.bay-power-share > i > b {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: #31a45c;
+    transition: width 450ms ease;
+}
+
+.bay-power-share.is-faulted,
+.bay-power-share.is-faulted::after {
+    border-color: #d37668;
+    background: #fff1ec;
+}
+
+.bay-power-share.is-faulted strong,
+.bay-power-share.is-faulted small {
+    color: #8a352a;
+}
+
+.bay-power-share.is-faulted > i > b {
+    background: #d37668;
 }
 
 @keyframes topdown-arrival {
@@ -1090,6 +1128,10 @@ button:disabled {
 }
 
 .charger-status-dot.status-error {
+    background: var(--red);
+}
+
+.charger-status-dot.status-faulted {
     background: var(--red);
 }
 
@@ -1280,6 +1322,75 @@ button:disabled {
     border-right: 1px solid var(--line);
 }
 
+.black-box {
+    display: grid;
+    gap: 7px;
+    margin-top: 9px;
+    padding: 9px;
+    border: 1px solid #e8b5a9;
+    border-radius: 8px;
+    background: #fff8f5;
+}
+
+.black-box p,
+.black-box small,
+.black-box span {
+    margin: 0;
+    color: #765047;
+    font-size: 11px;
+}
+
+.black-box > strong {
+    color: #672e27;
+    font-size: 14px;
+    line-height: 1.25;
+}
+
+.black-box-controls {
+    display: flex;
+    gap: 5px;
+}
+
+.black-box-controls button,
+.fault-actions button {
+    min-height: 30px;
+    padding: 5px 8px;
+    border: 1px solid #ca8175;
+    border-radius: 6px;
+    background: #fff;
+    color: #71372e;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 750;
+}
+
+.black-box-controls button:disabled,
+.fault-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.fault-message {
+    display: grid;
+    gap: 4px;
+    margin: 5px 10px;
+    padding: 9px;
+    border: 1px solid #e8b5a9;
+    border-radius: 8px;
+    background: #fff8f5;
+    color: #71372e;
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.fault-message strong {
+    font-size: 12px;
+}
+
+.fault-actions {
+    padding-top: 0;
+}
+
 .console-heading {
     display: flex;
     align-items: center;
@@ -1382,7 +1493,7 @@ button:disabled {
 
 .tunnel-node {
     display: flex;
-    width: 126px;
+    width: 108px;
     min-width: 0;
     align-items: center;
     gap: 7px;
@@ -1765,16 +1876,16 @@ button:disabled {
     max-width: calc(100% - 36px);
     padding: 8px 11px;
     transform: translateX(-50%);
-    color: #6f3029;
-    border: 1px solid #e8bdb6;
+    color: #275136;
+    border: 1px solid #9bcbaa;
     border-radius: 9px;
-    background: rgba(255, 244, 241, 0.96);
+    background: rgba(240, 250, 243, 0.96);
     box-shadow: 0 4px 12px rgba(86, 42, 36, 0.08);
 }
 
 .power-warning strong {
     flex: 0 0 auto;
-    color: var(--red);
+    color: var(--green-dark);
     font-size: 10px;
     letter-spacing: 0.05em;
 }

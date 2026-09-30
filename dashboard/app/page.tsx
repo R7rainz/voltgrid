@@ -7,8 +7,6 @@ import {
     useState,
 } from "react";
 
-import { allocateFirstComePower } from "./baseline-power";
-
 const CSMS_HTTP_URL =
     process.env.NEXT_PUBLIC_CSMS_HTTP_URL ?? "http://localhost:6773";
 const CSMS_WS_URL =
@@ -31,6 +29,7 @@ type ChargerStatus =
     | "Available"
     | "Preparing"
     | "Charging"
+    | "Faulted"
     | "Error";
 
 type ProtocolStage =
@@ -42,6 +41,7 @@ type ProtocolStage =
     | "ready"
     | "authorize"
     | "meter"
+    | "fault"
     | "stop"
     | "invoice"
     | "complete"
@@ -56,6 +56,7 @@ const CHARGER_SCREEN: Record<ProtocolStage, string> = {
     ready: "READY",
     authorize: "AUTH",
     meter: "CHARGE",
+    fault: "FAULT",
     stop: "STOP",
     invoice: "BILL",
     complete: "DONE",
@@ -98,13 +99,18 @@ const TECH_STAGE_DETAILS: Record<
     },
     authorize: {
         transport: "OCPP JSON CALL",
-        message: "StartTransaction · idTag and meterStart",
-        csms: "Validates the request and creates a charging session",
+        message: "VoltGrid PowerRequest → StartTransaction",
+        csms: "Records charger demand and creates the charging session",
     },
     meter: {
-        transport: "OCPP JSON CALL",
-        message: "MeterValues · cumulative imported energy in Wh",
-        csms: "Persists readings and updates live session telemetry",
+        transport: "Go HTTP decision → outbound OCPP profile",
+        message: "SetChargingProfile applies the share; MeterValues records energy",
+        csms: "Rebalances on demand, session, and site changes",
+    },
+    fault: {
+        transport: "OCPP JSON CALL → Go allocation → outbound OCPP profile",
+        message: "StatusNotification Faulted → SetChargingProfile 0 kW",
+        csms: "Pauses billable energy and reallocates unused site power",
     },
     stop: {
         transport: "OCPP JSON CALL",
@@ -161,7 +167,16 @@ type SimulatedCharger = {
     invoice?: Invoice;
     paymentStatus?: "Pending" | "Paid";
     allocatedPowerKw?: number;
+    allocationUpdatedAt?: string;
+    hadFault?: boolean;
     error?: string;
+};
+
+type BlackBoxEvent = {
+    id: number;
+    at: string;
+    kind: string;
+    text: string;
 };
 
 type SiteSummary = {
@@ -207,7 +222,8 @@ function formatDuration(startedAt?: string, endedAt?: string) {
 function routeProgress(stage: ProtocolStage) {
     if (stage === "cable") return 1;
     if (["websocket", "boot", "status", "ready", "authorize"].includes(stage)) return 2;
-    if (["meter", "stop", "invoice", "complete"].includes(stage)) return 3;
+    if (stage === "meter" || stage === "fault") return 3;
+    if (["stop", "invoice", "complete"].includes(stage)) return 4;
     return 0;
 }
 
@@ -228,11 +244,13 @@ function protocolPacket(charger: SimulatedCharger, suppliedPowerKw: number) {
         case "ready":
             return "WebSocket open · charger ready for StartTransaction";
         case "authorize":
-            return `CALL StartTransaction · idTag=${charger.idTag}`;
+            return `CALL DataTransfer(PowerRequest=${formatPower(charger.requestedPowerKw)}) → StartTransaction`;
         case "meter":
             return suppliedPowerKw > 0
-                ? `CALL MeterValues · ${charger.meterWh} Wh → PostgreSQL`
-                : "MeterValues paused · site capacity exhausted";
+                ? `Go allocation ${formatPower(suppliedPowerKw)} → SetChargingProfile → MeterValues`
+                : "Go allocation pending · waiting for charging profile";
+        case "fault":
+            return `CALL StatusNotification · connector=${charger.connectorId} · Faulted`;
         case "stop":
             return `CALL StopTransaction · meterStop=${charger.meterWh} Wh`;
         case "invoice":
@@ -249,22 +267,23 @@ function protocolPacket(charger: SimulatedCharger, suppliedPowerKw: number) {
 const wait = (milliseconds: number) =>
     new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-function getProfileLimitKw(payload: unknown) {
+function getProfileLimitKw(payload: unknown): number | undefined {
     if (!isObject(payload) || !isObject(payload.csChargingProfiles)) {
-        return 0;
+        return undefined;
     }
 
     const schedule = payload.csChargingProfiles.chargingSchedule;
 
     if (!isObject(schedule) || !Array.isArray(schedule.chargingSchedulePeriod)) {
-        return 0;
+        return undefined;
     }
 
     const firstPeriod = schedule.chargingSchedulePeriod[0];
 
-    return isObject(firstPeriod) && typeof firstPeriod.limit === "number"
-        ? Math.max(0, firstPeriod.limit / 1000)
-        : 0;
+    return isObject(firstPeriod) && typeof firstPeriod.limit === "number" &&
+        Number.isFinite(firstPeriod.limit) && firstPeriod.limit >= 0
+        ? firstPeriod.limit / 1000
+        : undefined;
 }
 
 function CarVisual({ color }: { color: string }) {
@@ -305,6 +324,9 @@ export default function Home() {
         String(DEFAULT_CAR_POWER_KW),
     );
     const [focusedChargerId, setFocusedChargerId] = useState<string>();
+    const [incidentChargerId, setIncidentChargerId] = useState<string>();
+    const [blackBoxEvents, setBlackBoxEvents] = useState<BlackBoxEvent[]>([]);
+    const [replayStep, setReplayStep] = useState(0);
     const sockets = useRef(new Map<string, WebSocket>());
     const pending = useRef(new Map<string, PendingRequest>());
     const arrivalTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -314,6 +336,24 @@ export default function Home() {
     useEffect(() => {
         chargersRef.current = chargers;
     }, [chargers]);
+
+    useEffect(() => {
+        if (!incidentChargerId) return;
+        let cancelled = false;
+        const refresh = async () => {
+            try {
+                const response = await fetch(`${CSMS_HTTP_URL}/api/chargers/${encodeURIComponent(incidentChargerId)}/black-box`, { cache: "no-store" });
+                if (!response.ok) return;
+                const body = await response.json() as { events?: BlackBoxEvent[] };
+                if (!cancelled && Array.isArray(body.events)) setBlackBoxEvents(body.events);
+            } catch {
+                // The last confirmed timeline remains visible during a brief backend outage.
+            }
+        };
+        void refresh();
+        const timer = setInterval(refresh, 1500);
+        return () => { cancelled = true; clearInterval(timer); };
+    }, [incidentChargerId]);
 
     useEffect(() => {
         let cancelled = false;
@@ -396,6 +436,7 @@ export default function Home() {
 
     function showStation(id: string) {
         setFocusedChargerId(id);
+        setIncidentChargerId(chargersRef.current.find((charger) => charger.id === id)?.hadFault ? id : undefined);
     }
 
     function rejectPendingForCharger(id: string, error: Error) {
@@ -472,7 +513,11 @@ export default function Home() {
 
             if (actionOrPayload === "SetChargingProfile") {
                 const allocatedPowerKw = getProfileLimitKw(message[3]);
-                updateCharger(id, { allocatedPowerKw });
+                if (allocatedPowerKw === undefined) {
+                    socket.send(JSON.stringify([4, uniqueId, "PropertyConstraintViolation", "Invalid charging profile", {}]));
+                    return;
+                }
+                updateCharger(id, { allocatedPowerKw, allocationUpdatedAt: new Date().toISOString() });
                 setDemoStatus(`${id} power profile applied · ${formatPower(allocatedPowerKw)}`);
                 socket.send(JSON.stringify([3, uniqueId, { status: "Accepted" }]));
                 return;
@@ -615,6 +660,14 @@ export default function Home() {
         }
 
         try {
+            const demandResponse = await sendCall(id, "DataTransfer", {
+                vendorId: "VoltGrid",
+                messageId: "PowerRequest",
+                data: JSON.stringify({ requestedPowerKw: charger.requestedPowerKw }),
+            });
+            if (!isObject(demandResponse) || demandResponse.status !== "Accepted") {
+                throw new Error("The CSMS did not accept the power request");
+            }
             setDemoStatus(`${id} → StatusNotification · vehicle preparing`);
             updateCharger(id, {
                 status: "Preparing",
@@ -623,6 +676,8 @@ export default function Home() {
                 invoice: undefined,
                 paymentStatus: undefined,
                 sessionStartedAt: undefined,
+                allocatedPowerKw: 0,
+                hadFault: false,
             });
 
             await sendCall(id, "StatusNotification", {
@@ -681,7 +736,7 @@ export default function Home() {
             setDemoStatus(
                 transactionStatus === "ConcurrentTx"
                     ? `${id} resumed · active transaction recovered`
-                    : `${id} charging · unmanaged ${formatPower(charger.requestedPowerKw)} request accepted`,
+                    : `${id} charging · Go allocator calculating a fair share`,
             );
         } catch (error) {
             updateCharger(id, {
@@ -700,21 +755,17 @@ export default function Home() {
             return;
         }
 
-        const suppliedPowerKw =
-            allocateFirstComePower(
-                chargersRef.current,
-                site?.powerLimitKw ?? DEFAULT_SITE_CAPACITY_KW,
-            ).get(id) ?? 0;
+        const suppliedPowerKw = charger.allocatedPowerKw ?? 0;
 
-        if (suppliedPowerKw === 0) {
-            setDemoStatus(`${id} waiting · no site power remains`);
+        if (suppliedPowerKw <= 0 || charger.requestedPowerKw <= 0) {
+            setDemoStatus(`${id} waiting for its Go charging profile`);
             return;
         }
 
         const addedWh = Math.max(
             1,
             Math.round(
-                (requestedWh * suppliedPowerKw) / charger.requestedPowerKw,
+                (requestedWh * Math.min(suppliedPowerKw, charger.requestedPowerKw)) / charger.requestedPowerKw,
             ),
         );
         const meterWh = charger.meterWh + addedWh;
@@ -744,6 +795,10 @@ export default function Home() {
                 ).toFixed(1)} kWh recorded`,
             );
         } catch (error) {
+            if (chargersRef.current.find((item) => item.id === id)?.status === "Faulted") {
+                setDemoStatus(`${id} meter reading blocked during fault`);
+                return;
+            }
             updateCharger(id, {
                 status: "Error",
                 protocolStage: "error",
@@ -808,6 +863,7 @@ export default function Home() {
                 protocolStage: "complete",
                 invoice: invoiceData.invoice,
                 paymentStatus: "Pending",
+                allocatedPowerKw: 0,
             });
             setDemoStatus(`${id} complete · invoice issued`);
         } catch (error) {
@@ -842,6 +898,59 @@ export default function Home() {
         setDemoStatus(`${id} · ${targetEnergyKwh} kWh charging plan selected`);
     }
 
+    async function updateActiveDemand(id: string) {
+        const charger = chargersRef.current.find((item) => item.id === id);
+        if (!charger || charger.status !== "Charging") return;
+        try {
+            const response = await sendCall(id, "DataTransfer", {
+                vendorId: "VoltGrid",
+                messageId: "PowerRequest",
+                data: JSON.stringify({ requestedPowerKw: charger.requestedPowerKw }),
+            });
+            if (!isObject(response) || response.status !== "Accepted") {
+                throw new Error("Power request was rejected");
+            }
+            setDemoStatus(`${id} demand changed · Go recalculating all active EVs`);
+        } catch (error) {
+            setDemoStatus(`${id} demand update failed: ${String(error)}`);
+        }
+    }
+
+    async function injectFault(id: string) {
+        const charger = chargersRef.current.find((item) => item.id === id);
+        if (!charger?.transactionId || charger.status !== "Charging") return;
+        try {
+            await sendCall(id, "StatusNotification", {
+                connectorId: charger.connectorId,
+                status: "Faulted",
+                errorCode: "PowerSwitchFailure",
+            });
+            updateCharger(id, { status: "Faulted", protocolStage: "fault", hadFault: true });
+            setIncidentChargerId(id);
+            setBlackBoxEvents([]);
+            setReplayStep(0);
+            setDemoStatus(`${id} reported PowerSwitchFailure · CSMS pausing its power`);
+        } catch (error) {
+            updateCharger(id, { error: `Fault report failed: ${String(error)}` });
+        }
+    }
+
+    async function recoverFault(id: string) {
+        const charger = chargersRef.current.find((item) => item.id === id);
+        if (charger?.status !== "Faulted") return;
+        try {
+            await sendCall(id, "StatusNotification", {
+                connectorId: charger.connectorId,
+                status: "Charging",
+                errorCode: "NoError",
+            });
+            updateCharger(id, { status: "Charging", protocolStage: "meter", error: undefined });
+            setDemoStatus(`${id} recovered · CSMS recalculating site power`);
+        } catch (error) {
+            updateCharger(id, { error: `Recovery failed: ${String(error)}` });
+        }
+    }
+
     function confirmMockPayment(id: string) {
         updateCharger(id, { paymentStatus: "Paid" });
         setDemoStatus(`${id} · demo payment confirmed`);
@@ -868,13 +977,14 @@ export default function Home() {
                 1,
                 Math.round(
                     (chargersRef.current.find((charger) => charger.id === id)
-                        ?.targetEnergyKwh ?? 20) * 250,
+                        ?.targetEnergyKwh ?? 20) * 125,
                 ),
             );
 
-            for (let reading = 0; reading < 4; reading += 1) {
+            for (let reading = 0; reading < 8; reading += 1) {
+                if (chargersRef.current.find((charger) => charger.id === id)?.status !== "Charging") return;
                 await addEnergy(id, selectedEnergyWh);
-                await new Promise((resolve) => setTimeout(resolve, 1_300));
+                await new Promise((resolve) => setTimeout(resolve, 1_500));
             }
 
             await new Promise((resolve) => setTimeout(resolve, 700));
@@ -963,7 +1073,7 @@ export default function Home() {
 
         sockets.current.get(id)?.close();
         sockets.current.delete(id);
-        updateCharger(id, { status: "Offline", protocolStage: "websocket" });
+        updateCharger(id, { status: "Offline", protocolStage: "websocket", allocatedPowerKw: 0 });
         setDemoStatus(`${id} disconnected · site capacity released`);
     }
 
@@ -1034,21 +1144,15 @@ export default function Home() {
     const projectedDemandKw = chargers
         .filter((charger) => charger.status === "Charging")
         .reduce((total, charger) => total + charger.requestedPowerKw, 0);
-    const baselinePowerById = allocateFirstComePower(
-        chargers,
-        siteCapacityKw,
-    );
-    const suppliedPowerKw = [...baselinePowerById.values()].reduce(
-        (total, power) => total + power,
-        0,
-    );
+    const suppliedPowerKw = chargers
+        .filter((charger) => charger.status === "Charging" || charger.status === "Faulted")
+        .reduce((total, charger) => total + (charger.allocatedPowerKw ?? 0), 0);
     const unmetDemandKw = Math.max(0, projectedDemandKw - suppliedPowerKw);
-    const unusedCapacityKw = Math.max(0, siteCapacityKw - suppliedPowerKw);
     const focusedCharger =
         chargers.find((charger) => charger.id === focusedChargerId) ??
         chargers.at(-1);
     const focusedPowerKw = focusedCharger
-        ? baselinePowerById.get(focusedCharger.id) ?? 0
+        ? focusedCharger.allocatedPowerKw ?? 0
         : 0;
     const focusedSessionEnergyKwh = focusedCharger
         ? Math.max(
@@ -1304,7 +1408,7 @@ export default function Home() {
                                     </div>
                                     <div className="offer-summary">
                                         <span><small>Tariff</small><strong>₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)}/kWh</strong></span>
-                                        <span><small>Est. time</small><strong>≈ {selectedPlanMinutes} min</strong></span>
+                                        <span><small>Est. @ request</small><strong>≈ {selectedPlanMinutes} min</strong></span>
                                         <span><small>Est. total</small><strong>₹{selectedPlanCostInr.toFixed(2)}</strong></span>
                                     </div>
                                     <button
@@ -1363,15 +1467,32 @@ export default function Home() {
                                 <aside className="session-console" aria-live="polite">
                                     <div className="console-heading">
                                         <span className={`charger-status-dot status-${focusedCharger.status.toLowerCase()}`} />
-                                        <div><small>Session state</small><strong>{focusedCharger.status}</strong></div>
+                                        <div><small>{focusedCharger.hadFault ? "VOLTGRID BLACK BOX" : "Session state"}</small><strong>{focusedCharger.status}</strong></div>
                                     </div>
-                                    <dl>
+                                    {focusedCharger.hadFault ? (
+                                        <div className="black-box" role="region" aria-label="Charger fault timeline">
+                                            <p>Session {focusedCharger.transactionId} · {formatPower(focusedPowerKw)} allocated · {focusedSessionEnergyKwh.toFixed(1)} kWh billed so far</p>
+                                            {blackBoxEvents.length ? (
+                                                <>
+                                                    <strong>{blackBoxEvents[Math.min(replayStep, blackBoxEvents.length - 1)]?.text}</strong>
+                                                    <small>{formatDateTime(blackBoxEvents[Math.min(replayStep, blackBoxEvents.length - 1)]?.at)}</small>
+                                                    <div className="black-box-controls">
+                                                        <button onClick={() => setReplayStep(0)}>Replay</button>
+                                                        <button onClick={() => setReplayStep((step) => Math.min(step + 1, blackBoxEvents.length - 1))} disabled={replayStep >= blackBoxEvents.length - 1}>Next</button>
+                                                        <button onClick={() => setReplayStep(blackBoxEvents.length - 1)}>Latest</button>
+                                                    </div>
+                                                    <span>{Math.min(replayStep + 1, blackBoxEvents.length)} / {blackBoxEvents.length} recorded steps</span>
+                                                </>
+                                            ) : <strong>Waiting for the fault event to be stored…</strong>}
+                                        </div>
+                                    ) : <dl>
                                         <div><dt>Connector</dt><dd>{focusedCharger.connectorId}</dd></div>
                                         <div><dt>Transaction</dt><dd>{focusedCharger.transactionId ?? "—"}</dd></div>
                                         <div><dt>Energy</dt><dd>{focusedSessionEnergyKwh.toFixed(1)} kWh</dd></div>
+                                        <div><dt>Go power share</dt><dd>{formatPower(focusedPowerKw)} / {formatPower(focusedCharger.requestedPowerKw)}</dd></div>
                                         <div><dt>Tariff</dt><dd>₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)}/kWh</dd></div>
                                         <div><dt>Live cost</dt><dd>₹{focusedSessionCostInr.toFixed(2)}</dd></div>
-                                    </dl>
+                                    </dl>}
                                 </aside>
                             )}
 
@@ -1387,14 +1508,15 @@ export default function Home() {
                                         ["EV", focusedCharger.idTag],
                                         ["CHARGER", `Connector ${focusedCharger.connectorId}`],
                                         ["CSMS", "Hono · Bun :6773"],
+                                        ["GO ALLOC", "Fair power share"],
                                         ["DATABASE", "PostgreSQL"],
                                     ].map(([label, detail], index) => (
                                         <div className="tunnel-section" key={label}>
                                             <div className={`tunnel-node ${index < focusedRouteProgress ? "is-done" : ""} ${index === focusedRouteProgress ? "is-active" : ""}`}>
-                                                <b>{index === 0 ? "EV" : index === 1 ? "ϟ" : index === 2 ? "VG" : "DB"}</b>
+                                                <b>{index === 0 ? "EV" : index === 1 ? "ϟ" : index === 2 ? "VG" : index === 3 ? "GO" : "DB"}</b>
                                                 <span><strong>{label}</strong><small>{detail}</small></span>
                                             </div>
-                                            {index < 3 ? <span className={`tunnel-wire ${index < focusedRouteProgress ? "is-live" : ""}`}><i /></span> : null}
+                                            {index < 4 ? <span className={`tunnel-wire ${index < focusedRouteProgress ? "is-live" : ""}`}><i /></span> : null}
                                         </div>
                                     ))}
                                 </div>
@@ -1406,7 +1528,7 @@ export default function Home() {
                                 <div className="packet-readout">
                                     <span>PACKET</span>
                                     <code>{protocolPacket(focusedCharger, focusedPowerKw)}</code>
-                                    <i>{focusedCharger.status === "Error" ? "FAILED" : "ACK"}</i>
+                                    <i>{focusedCharger.status === "Error" ? "FAILED" : focusedCharger.status === "Faulted" ? "FAULT" : "ACK"}</i>
                                 </div>
                             </details>
                             ) : null}
@@ -1424,7 +1546,7 @@ export default function Home() {
                                     <button
                                         className="cinematic-button"
                                         onClick={() => void runDemo(focusedCharger.id)}
-                                        disabled={focusedCharger.arriving || focusedCharger.status === "Connecting" || focusedCharger.status === "Charging"}
+                                        disabled={focusedCharger.arriving || focusedCharger.status === "Connecting" || focusedCharger.status === "Charging" || focusedCharger.status === "Faulted"}
                                     >
                                         {focusedCharger.status === "Error" || focusedCharger.status === "Offline"
                                             ? "Retry connection"
@@ -1463,17 +1585,11 @@ export default function Home() {
                                         <span className={`overhead-car status-${charger.status.toLowerCase()} ${charger.arriving ? "car-arrival" : ""}`}>
                                             <CarVisual color={CAR_COLORS[bayIndex]} />
                                         </span>
-                                        {charger.status === "Charging" &&
-                                        (baselinePowerById.get(charger.id) ?? 0) <
-                                            charger.requestedPowerKw ? (
-                                            <span className="bay-power-error">
-                                                <strong>STATION MESSAGE</strong>
-                                                <span>
-                                                    Only {formatPower(unusedCapacityKw)} remains. This EV asked for {formatPower(charger.requestedPowerKw)}.
-                                                </span>
-                                                <small>
-                                                    Supplied {formatPower(baselinePowerById.get(charger.id) ?? 0)} · Fair load balancer required
-                                                </small>
+                                        {charger.status === "Charging" || charger.status === "Faulted" ? (
+                                            <span className={`bay-power-share ${charger.status === "Faulted" ? "is-faulted" : ""}`}>
+                                                <strong>{charger.allocatedPowerKw === undefined ? "CALCULATING" : `${formatPower(charger.allocatedPowerKw)} ALLOCATED`}</strong>
+                                                <small>{charger.status === "Faulted" ? "FAULT · allocation paused" : `Requested ${formatPower(charger.requestedPowerKw)}`}</small>
+                                                <i><b style={{ width: `${charger.requestedPowerKw > 0 ? Math.min(100, ((charger.allocatedPowerKw ?? 0) / charger.requestedPowerKw) * 100) : 0}%` }} /></i>
                                             </span>
                                         ) : null}
                                         <span className={`overhead-cable ${charger.status === "Charging" ? "is-charging" : ""}`} />
@@ -1497,12 +1613,9 @@ export default function Home() {
 
                     {unmetDemandKw > 0 ? (
                         <div className="power-warning" role="status">
-                            <strong>CAPACITY CONFLICT</strong>
+                            <strong>GO BALANCER SHARING POWER</strong>
                             <span>
-                                {formatPower(projectedDemandKw)} requested · {formatPower(unmetDemandKw)} unmet
-                                {unusedCapacityKw > 0
-                                    ? ` · ${formatPower(unusedCapacityKw)} unused; below the next full request`
-                                    : ""}
+                                {formatPower(projectedDemandKw)} requested · {formatPower(suppliedPowerKw)} allocated · {formatPower(unmetDemandKw)} unmet
                             </span>
                         </div>
                     ) : null}
@@ -1659,7 +1772,7 @@ export default function Home() {
                                                 <span className="card-status">
                                                     {charger.status === "Charging" &&
                                                     charger.requestedPowerKw > 0 &&
-                                                    (baselinePowerById.get(charger.id) ?? 0) === 0
+                                                    (charger.allocatedPowerKw ?? 0) === 0
                                                         ? "Waiting for power"
                                                         : charger.status}
                                                 </span>
@@ -1692,27 +1805,31 @@ export default function Home() {
                                         </div>
                                     </div>
                                     <div className="backend-line">
-                                        <span>Allocated power</span>
+                                        <span>Go allocation</span>
                                         <strong>
-                                            {charger.status === "Charging"
-                                                ? formatPower(
-                                                      baselinePowerById.get(charger.id) ?? 0,
-                                                  )
+                                            {charger.status === "Charging" || charger.status === "Faulted"
+                                                ? charger.allocatedPowerKw === undefined ? "Calculating" : formatPower(charger.allocatedPowerKw)
                                                 : "0 kW"}
                                         </strong>
                                     </div>
-                                    {charger.status === "Charging" &&
-                                    (baselinePowerById.get(charger.id) ?? 0) <
-                                        charger.requestedPowerKw ? (
+                                    {charger.status === "Charging" ? (
                                         <div className="station-power-message" role="status">
-                                            <span>Station message</span>
-                                            <strong>Not enough power for this EV</strong>
+                                            <span>Live smart charging · Go → CSMS → OCPP</span>
+                                            <strong>{formatPower(charger.allocatedPowerKw ?? 0)} of {formatPower(charger.requestedPowerKw)} requested</strong>
                                             <p>
-                                                {formatPower(unusedCapacityKw)} remains, but the EV requested {formatPower(charger.requestedPowerKw)}. Phase 1 does not divide the available power.
+                                                Fair water-filling shares the {formatPower(siteCapacityKw)} site limit across active EVs. The charger acknowledged this SetChargingProfile limit.
                                             </p>
-                                            <small>
-                                                Phase 2 solution: a fair water-filling load balancer will redistribute the {formatPower(siteCapacityKw)} site limit across active EVs.
-                                            </small>
+                                            <label>Change demand (kW)
+                                                <input type="number" min="0" step="any" value={charger.requestedPowerKw}
+                                                    onChange={(event) => updateCharger(charger.id, { requestedPowerKw: Math.max(0, Number(event.target.value)) })}
+                                                    onBlur={() => void updateActiveDemand(charger.id)} />
+                                            </label>
+                                        </div>
+                                    ) : null}
+                                    {charger.status === "Faulted" ? (
+                                        <div className="fault-message" role="alert">
+                                            <strong>PowerSwitchFailure reported</strong>
+                                            <span>CSMS is sending 0 kW before reallocating power. Metering is paused; recover this simulated charger to resume.</span>
                                         </div>
                                     ) : null}
                                     <div className="tariff-strip">
@@ -1736,24 +1853,30 @@ export default function Home() {
                                         <button
                                             className="secondary-button"
                                             onClick={() => void beginConnection(charger.id).catch(() => undefined)}
-                                            disabled={charger.status === "Connecting" || charger.status === "Charging" || charger.status === "Available"}
+                                            disabled={charger.status === "Connecting" || charger.status === "Charging" || charger.status === "Available" || charger.status === "Faulted"}
                                         >
                                             Connect
                                         </button>
                                         <button
                                             className="primary-button compact-button"
                                             onClick={() => void runDemo(charger.id)}
-                                            disabled={charger.status === "Connecting" || charger.status === "Charging"}
+                                            disabled={charger.status === "Connecting" || charger.status === "Charging" || charger.status === "Faulted"}
                                         >
                                             Run full demo
                                         </button>
                                     </div>
                                     <div className="card-actions lower-actions">
                                         <button className="text-button" onClick={() => void startSession(charger.id)} disabled={charger.status !== "Available"}>Start</button>
-                                        <button className="text-button" onClick={() => void addEnergy(charger.id)} disabled={charger.status !== "Charging"}>+1 kWh</button>
+                                        <button className="text-button" onClick={() => void addEnergy(charger.id)} disabled={charger.status !== "Charging"}>Meter tick</button>
                                         <button className="text-button stop-button" onClick={() => void stopSession(charger.id)} disabled={charger.status !== "Charging"}>Stop & invoice</button>
                                         <button className="text-button" onClick={() => disconnectCharger(charger.id)} disabled={charger.status === "Offline"}>Disconnect</button>
                                     </div>
+                                    {(charger.status === "Charging" || charger.status === "Faulted") && (
+                                        <div className="card-actions fault-actions">
+                                            <button onClick={() => void injectFault(charger.id)} disabled={charger.status !== "Charging"}>Inject fault</button>
+                                            <button onClick={() => void recoverFault(charger.id)} disabled={charger.status !== "Faulted"}>Recover charger</button>
+                                        </div>
+                                    )}
                                 </article>
                             ))}
                         </div>
