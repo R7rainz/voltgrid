@@ -11,6 +11,11 @@ export type ChargerState = {
     lastSeenAt: string;
     allocatedPowerKw: number;
     requestedPowerKw?: number;
+    feederId?: string;
+    energyRequiredKwh?: number;
+    energyDeliveredKwh?: number;
+    departureAt?: string;
+    priority?: number;
     connectors: Record<string, ConnectorState>;
 };
 
@@ -29,6 +34,7 @@ export function getOrCreateCharger(chargerId: string) {
             connected: false,
             lastSeenAt: now(),
             allocatedPowerKw: 0,
+            feederId: "main-feeder",
             connectors: {},
         };
 
@@ -77,9 +83,24 @@ export function updateChargerAllocation(
     return charger;
 }
 
-export function updateChargerDemand(chargerId: string, requestedPowerKw: number) {
+export function updateChargerDemand(
+    chargerId: string,
+    demand: {
+        requestedPowerKw: number;
+        feederId?: string;
+        energyRequiredKwh?: number;
+        energyDeliveredKwh?: number;
+        departureAt?: string;
+        priority?: number;
+    },
+) {
     const charger = getOrCreateCharger(chargerId);
-    charger.requestedPowerKw = requestedPowerKw;
+    charger.requestedPowerKw = demand.requestedPowerKw;
+    charger.feederId = demand.feederId ?? charger.feederId ?? "main-feeder";
+    charger.energyRequiredKwh = demand.energyRequiredKwh;
+    charger.energyDeliveredKwh = demand.energyDeliveredKwh;
+    charger.departureAt = demand.departureAt;
+    charger.priority = demand.priority;
     charger.lastSeenAt = now();
     return charger;
 }

@@ -554,6 +554,28 @@ ocppRoutes.get(
                         sendCallError(ws, uniqueId, "PropertyConstraintViolation", "requestedPowerKw must be non-negative");
                         return;
                     }
+                    const demandObject = isJsonObject(demand) ? demand : {};
+                    const optionalNumbers = [
+                        demandObject.energyRequiredKwh,
+                        demandObject.energyDeliveredKwh,
+                        demandObject.priority,
+                    ];
+                    if (optionalNumbers.some((value) => value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0))) {
+                        sendCallError(ws, uniqueId, "PropertyConstraintViolation", "energy and priority values must be non-negative numbers");
+                        return;
+                    }
+                    const departureAtValue = demandObject.departureAt;
+                    const departureAt = departureAtValue === undefined ? undefined : parseTimestamp(departureAtValue);
+                    if (departureAtValue !== undefined && departureAt === undefined) {
+                        sendCallError(ws, uniqueId, "PropertyConstraintViolation", "departureAt must be an RFC3339 timestamp");
+                        return;
+                    }
+                    const feederId = demandObject.feederId === undefined ? undefined :
+                        isNonEmptyString(demandObject.feederId) ? demandObject.feederId.trim() : undefined;
+                    if (demandObject.feederId !== undefined && feederId === undefined) {
+                        sendCallError(ws, uniqueId, "PropertyConstraintViolation", "feederId must be a non-empty string");
+                        return;
+                    }
 
                     try {
                         const charger = await db.orm.public.Charger.select("siteId")
@@ -563,7 +585,14 @@ ocppRoutes.get(
                             return;
                         }
 
-                        updateChargerDemand(String(chargerId), requestedPowerKw);
+                        updateChargerDemand(String(chargerId), {
+                            requestedPowerKw,
+                            feederId,
+                            energyRequiredKwh: demandObject.energyRequiredKwh as number | undefined,
+                            energyDeliveredKwh: demandObject.energyDeliveredKwh as number | undefined,
+                            departureAt,
+                            priority: demandObject.priority as number | undefined,
+                        });
                         ws.send(JSON.stringify([3, uniqueId, { status: "Accepted" }]));
                         void rebalanceSite(charger.siteId);
                     } catch (error) {

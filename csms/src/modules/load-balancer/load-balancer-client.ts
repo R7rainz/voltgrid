@@ -7,15 +7,28 @@ type Demand = {
     chargerId: string;
     requestedPowerKw: number;
     maxPowerKw: number;
+    feederId: string;
+    energyRequiredKwh?: number;
+    energyDeliveredKwh?: number;
+    departureAt?: string;
+    priority?: number;
 };
 
-export type AllocationPolicy = "fcfs" | "equal-share" | "demand-weighted";
+export type AllocationPolicy = "fcfs" | "equal-share" | "demand-weighted" | "deadline-aware";
 
 export type LoadBalancerResponse = {
     policy?: AllocationPolicy;
     sitePowerLimitKw: number;
+    effectivePowerLimitKw?: number;
+    constraintPath?: string;
     totalRequestedPowerKw?: number;
     totalAllocatedPowerKw: number;
+    feeders?: Array<{
+        feederId: string;
+        powerLimitKw: number;
+        requestedPowerKw: number;
+        allocatedPowerKw: number;
+    }>;
     allocations: Array<{
         chargerId: string;
         requestedPowerKw?: number;
@@ -42,7 +55,7 @@ export function setSiteAllocationPolicy(
     siteId: number,
     policy: string,
 ): AllocationPolicy {
-    if (policy !== "fcfs" && policy !== "equal-share" && policy !== "demand-weighted") {
+    if (policy !== "fcfs" && policy !== "equal-share" && policy !== "demand-weighted" && policy !== "deadline-aware") {
         throw new Error("Unsupported allocation policy");
     }
     allocationPolicies.set(siteId, policy);
@@ -139,7 +152,17 @@ async function rebalanceOnce(
             connector.errorCode !== "NoError";
         const requestedPowerKw = unavailable ? 0 :
             (liveState.get(charger.chargePointId)?.requestedPowerKw ?? defaultPowerKw);
-        demands.push({ chargerId: charger.chargePointId, requestedPowerKw, maxPowerKw: requestedPowerKw });
+        const state = liveState.get(charger.chargePointId);
+        demands.push({
+            chargerId: charger.chargePointId,
+            requestedPowerKw,
+            maxPowerKw: requestedPowerKw,
+            feederId: state?.feederId ?? "main-feeder",
+            energyRequiredKwh: state?.energyRequiredKwh,
+            energyDeliveredKwh: state?.energyDeliveredKwh,
+            departureAt: state?.departureAt,
+            priority: state?.priority,
+        });
     }
     demands.sort(
         (left, right) =>
@@ -162,6 +185,7 @@ async function rebalanceOnce(
             body: JSON.stringify({
                 sitePowerLimitKw: site.powerLimitKw,
                 policy,
+                feederLimits: [{ feederId: "main-feeder", powerLimitKw: site.powerLimitKw }],
                 activeChargers: demands,
             }),
             signal: AbortSignal.timeout(5000),
