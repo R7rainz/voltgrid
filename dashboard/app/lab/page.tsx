@@ -341,7 +341,7 @@ export default function OperationsLabPage() {
                     <span className="lab-eyebrow">VOLTGRID · PHASE 2 ANALYSIS</span>
                     <h1>Charging Policy Comparison</h1>
                    <p>
-                        The same station and vehicles, replayed through three
+                        The same station and vehicles, replayed through four
                         charging strategies.
                    </p>
                 </div>
@@ -456,8 +456,8 @@ export default function OperationsLabPage() {
                             <h2>Turn the station into an experiment.</h2>
                             <p>
                                 Run the default six-vehicle scenario to compare
-                                first-come, equal-share, and deadline-aware
-                                scheduling.
+                                first-come, equal-share, demand-weighted, and
+                                deadline-aware scheduling.
                             </p>
                         </div>
                     ) : (

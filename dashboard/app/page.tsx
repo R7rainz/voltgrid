@@ -13,7 +13,7 @@ const CSMS_WS_URL =
     process.env.NEXT_PUBLIC_CSMS_WS_URL ?? "ws://localhost:6773";
 const DEFAULT_SITE_CAPACITY_KW = 100;
 const DEFAULT_CAR_POWER_KW = 50;
-type AllocationPolicy = "fcfs" | "equal-share" | "demand-weighted";
+type AllocationPolicy = "fcfs" | "equal-share" | "demand-weighted" | "deadline-aware";
 
 const ALLOCATION_POLICIES: Array<{
     id: AllocationPolicy;
@@ -34,6 +34,11 @@ const ALLOCATION_POLICIES: Array<{
         id: "fcfs",
         label: "First come first served",
         description: "Earlier cars consume capacity first.",
+    },
+    {
+        id: "deadline-aware",
+        label: "Deadline aware",
+        description: "Urgent cars receive more power before departure.",
     },
 ];
 const CAR_COLORS = ["#2f6fed", "#e45d3f", "#25866f", "#7657c8"];
@@ -176,11 +181,15 @@ type SimulatedCharger = {
     vehicleModel: string;
     batteryKwh: number;
     rangeKm: number;
+    batteryHealthPct: number;
     startingSoc: number;
     targetEnergyKwh: number;
+    distanceRequestKm: number;
     sessionStartedAt?: string;
     connectorId: number;
     requestedPowerKw: number;
+    departureAt: string;
+    priority: number;
     protocolStage: ProtocolStage;
     status: ChargerStatus;
     meterWh: number;
@@ -205,7 +214,7 @@ function deliveredEnergyKwh(charger: SimulatedCharger) {
 function energyForTargetSoc(charger: SimulatedCharger, targetSocPct: number) {
     return Math.max(
         0,
-        ((targetSocPct - charger.startingSoc) / 100) * charger.batteryKwh,
+        ((targetSocPct - charger.startingSoc) / 100) * usableBatteryKwh(charger),
     );
 }
 
@@ -213,8 +222,22 @@ function targetSocForEnergy(charger: SimulatedCharger) {
     return Math.min(
         100,
         charger.startingSoc +
-            (charger.targetEnergyKwh / charger.batteryKwh) * 100,
+            (charger.targetEnergyKwh / Math.max(0.001, usableBatteryKwh(charger))) * 100,
     );
+}
+
+function usableBatteryKwh(charger: SimulatedCharger) {
+    return Math.max(0.001, charger.batteryKwh * (charger.batteryHealthPct / 100));
+}
+
+function energyForDistance(charger: SimulatedCharger, distanceKm: number) {
+    const efficiencyAdjustment = 1 + (100 - charger.batteryHealthPct) / 400;
+    const requestedEnergy = Math.max(
+        0,
+        (distanceKm * charger.batteryKwh / charger.rangeKm) * efficiencyAdjustment,
+    );
+    const energyToFull = energyForTargetSoc(charger, 100);
+    return Math.min(requestedEnergy, energyToFull);
 }
 
 function remainingMinutes(charger: SimulatedCharger) {
@@ -391,6 +414,10 @@ export default function Home() {
     const [requestedPowerInput, setRequestedPowerInput] = useState(
         String(DEFAULT_CAR_POWER_KW),
     );
+    const [departureMinutesInput, setDepartureMinutesInput] = useState("30");
+    const [vehicleProfileInput, setVehicleProfileInput] = useState("0");
+    const [batteryHealthInput, setBatteryHealthInput] = useState("92");
+    const [startingSocInput, setStartingSocInput] = useState("42");
     const [focusedChargerId, setFocusedChargerId] = useState<string>();
     const [incidentChargerId, setIncidentChargerId] = useState<string>();
     const [blackBoxEvents, setBlackBoxEvents] = useState<BlackBoxEvent[]>([]);
@@ -746,7 +773,14 @@ export default function Home() {
             const demandResponse = await sendCall(id, "DataTransfer", {
                 vendorId: "VoltGrid",
                 messageId: "PowerRequest",
-                data: JSON.stringify({ requestedPowerKw: charger.requestedPowerKw }),
+                data: JSON.stringify({
+                    requestedPowerKw: charger.requestedPowerKw,
+                    energyRequiredKwh: charger.targetEnergyKwh,
+                    energyDeliveredKwh: deliveredEnergyKwh(charger),
+                    departureAt: charger.departureAt,
+                    priority: charger.priority,
+                    feederId: "main-feeder",
+                }),
             });
             if (!isObject(demandResponse) || demandResponse.status !== "Accepted") {
                 throw new Error("The CSMS did not accept the power request");
@@ -872,6 +906,21 @@ export default function Home() {
             });
 
             updateCharger(id, { meterWh });
+            const updatedCharger = chargersRef.current.find((item) => item.id === id);
+            if (updatedCharger) {
+                await sendCall(id, "DataTransfer", {
+                    vendorId: "VoltGrid",
+                    messageId: "PowerRequest",
+                    data: JSON.stringify({
+                        requestedPowerKw: updatedCharger.requestedPowerKw,
+                        energyRequiredKwh: updatedCharger.targetEnergyKwh,
+                        energyDeliveredKwh: deliveredEnergyKwh(updatedCharger),
+                        departureAt: updatedCharger.departureAt,
+                        priority: updatedCharger.priority,
+                        feederId: "main-feeder",
+                    }),
+                });
+            }
             setDemoStatus(
                 `${id} receiving ${formatPower(suppliedPowerKw)} · +${(
                     addedWh / 1000
@@ -986,6 +1035,21 @@ export default function Home() {
         setDemoStatus(`${id} · target set to ${targetSocPct}% SOC`);
     }
 
+    function recommendDistancePlan(id: string) {
+        const charger = chargersRef.current.find((item) => item.id === id);
+
+        if (!charger) return;
+
+        const targetEnergyKwh = energyForDistance(
+            charger,
+            charger.distanceRequestKm,
+        );
+        updateCharger(id, { targetEnergyKwh });
+        setDemoStatus(
+            `${id} · ${charger.distanceRequestKm} km recommendation applied · ${targetEnergyKwh.toFixed(1)} kWh`,
+        );
+    }
+
     async function updateActiveDemand(id: string) {
         const charger = chargersRef.current.find((item) => item.id === id);
         if (!charger || charger.status !== "Charging") return;
@@ -993,7 +1057,14 @@ export default function Home() {
             const response = await sendCall(id, "DataTransfer", {
                 vendorId: "VoltGrid",
                 messageId: "PowerRequest",
-                data: JSON.stringify({ requestedPowerKw: charger.requestedPowerKw }),
+                data: JSON.stringify({
+                    requestedPowerKw: charger.requestedPowerKw,
+                    energyRequiredKwh: charger.targetEnergyKwh,
+                    energyDeliveredKwh: deliveredEnergyKwh(charger),
+                    departureAt: charger.departureAt,
+                    priority: charger.priority,
+                    feederId: "main-feeder",
+                }),
             });
             if (!isObject(response) || response.status !== "Accepted") {
                 throw new Error("Power request was rejected");
@@ -1135,6 +1206,10 @@ export default function Home() {
         const tag = idTag.trim();
         const connector = Number(connectorId);
         const requestedPowerKw = Number(requestedPowerInput);
+        const departureMinutes = Number(departureMinutesInput);
+        const profileIndex = Number(vehicleProfileInput);
+        const batteryHealthPct = Number(batteryHealthInput);
+        const startingSoc = Number(startingSocInput);
 
         if (
             !id ||
@@ -1143,28 +1218,46 @@ export default function Home() {
             connector < 1 ||
             !Number.isFinite(requestedPowerKw) ||
             requestedPowerKw < 0 ||
+            !Number.isFinite(departureMinutes) ||
+            departureMinutes <= 0 ||
+            !Number.isInteger(profileIndex) ||
+            !VEHICLE_PROFILES[profileIndex] ||
+            !Number.isFinite(batteryHealthPct) ||
+            batteryHealthPct <= 0 ||
+            batteryHealthPct > 100 ||
+            !Number.isFinite(startingSoc) ||
+            startingSoc < 0 ||
+            startingSoc > 100 ||
             chargersRef.current.some((charger) => charger.id === id)
         ) {
             return;
         }
 
-        const vehicleProfile =
-            VEHICLE_PROFILES[chargersRef.current.length % VEHICLE_PROFILES.length];
+        const vehicleProfile = VEHICLE_PROFILES[profileIndex];
+        const initialDistanceKm = 50;
         const nextCharger: SimulatedCharger = {
             id,
             idTag: tag,
             vehicleModel: vehicleProfile.model,
             batteryKwh: vehicleProfile.batteryKwh,
             rangeKm: vehicleProfile.rangeKm,
-            startingSoc: vehicleProfile.startingSoc,
-            targetEnergyKwh: 20,
+            batteryHealthPct,
+            startingSoc,
+            targetEnergyKwh: 0,
+            distanceRequestKm: initialDistanceKm,
             connectorId: connector,
             requestedPowerKw,
+            departureAt: new Date(Date.now() + departureMinutes * 60_000).toISOString(),
+            priority: 0,
             protocolStage: "arrival",
             status: "Offline",
             meterWh: 100_000,
             arriving: true,
         };
+        nextCharger.targetEnergyKwh = energyForDistance(
+            nextCharger,
+            initialDistanceKm,
+        );
         const nextChargers = [...chargersRef.current, nextCharger];
 
         chargersRef.current = nextChargers;
@@ -1185,6 +1278,10 @@ export default function Home() {
 
         setChargerId(`demo-car-${String(nextChargers.length + 1).padStart(3, "0")}`);
         setIdTag(`DEMO-DRIVER-${String(nextChargers.length + 1).padStart(3, "0")}`);
+        setVehicleProfileInput(String((profileIndex + 1) % VEHICLE_PROFILES.length));
+        setStartingSocInput(
+            String(VEHICLE_PROFILES[(profileIndex + 1) % VEHICLE_PROFILES.length].startingSoc),
+        );
     }
 
     function disconnectCharger(id: string) {
@@ -1288,7 +1385,7 @@ export default function Home() {
         100,
         (focusedCharger?.startingSoc ?? 0) +
             (focusedSessionEnergyKwh /
-                (focusedCharger?.batteryKwh ?? 1)) *
+                (focusedCharger ? usableBatteryKwh(focusedCharger) : 1)) *
                 100,
     );
     const selectedPlanMinutes = focusedCharger
@@ -1308,6 +1405,21 @@ export default function Home() {
         ? focusedCharger.targetEnergyKwh *
           ((site?.tariffPaisePerKwh ?? 800) / 100)
         : 0;
+    const recommendedEnergyKwh = focusedCharger
+        ? energyForDistance(
+              focusedCharger,
+              focusedCharger.distanceRequestKm,
+          )
+        : 0;
+    const recommendedMinutes = focusedCharger
+        ? Math.ceil(
+              (recommendedEnergyKwh /
+                  Math.max(1, focusedCharger.requestedPowerKw)) *
+                  60,
+          )
+        : 0;
+    const recommendedCostInr =
+        recommendedEnergyKwh * ((site?.tariffPaisePerKwh ?? 800) / 100);
     const focusedRouteProgress = focusedCharger
         ? routeProgress(focusedCharger.protocolStage)
         : 0;
@@ -1486,14 +1598,18 @@ export default function Home() {
                                 <div className="soc-rail">
                                     <span style={{ width: `${focusedSoc}%` }} />
                                 </div>
-                                <div className="telemetry-grid">
-                                    <span>
-                                        <small>Battery</small>
-                                        <strong>{focusedCharger.batteryKwh} kWh</strong>
-                                    </span>
-                                    <span>
-                                        <small>Requested</small>
-                                        <strong>{formatPower(focusedCharger.requestedPowerKw)}</strong>
+                                    <div className="telemetry-grid">
+                                        <span>
+                                            <small>Battery</small>
+                                            <strong>{focusedCharger.batteryKwh} kWh</strong>
+                                        </span>
+                                        <span>
+                                            <small>Health</small>
+                                            <strong>{focusedCharger.batteryHealthPct}%</strong>
+                                        </span>
+                                        <span>
+                                            <small>Requested</small>
+                                            <strong>{formatPower(focusedCharger.requestedPowerKw)}</strong>
                                     </span>
                                     <span>
                                         <small>Received</small>
@@ -1525,6 +1641,10 @@ export default function Home() {
                                             <strong>{focusedCharger.startingSoc}% SOC</strong>
                                         </span>
                                         <span>
+                                            <small>Battery health</small>
+                                            <strong>{focusedCharger.batteryHealthPct}%</strong>
+                                        </span>
+                                        <span>
                                             <small>Target charge</small>
                                             <strong>{focusedTargetSoc.toFixed(0)}% SOC</strong>
                                         </span>
@@ -1533,9 +1653,31 @@ export default function Home() {
                                             <strong>{focusedCharger.targetEnergyKwh.toFixed(1)} kWh</strong>
                                         </span>
                                         <span>
+                                            <small>Departure window</small>
+                                            <strong>{new Date(focusedCharger.departureAt).toLocaleTimeString()}</strong>
+                                        </span>
+                                        <span>
                                             <small>To full</small>
                                             <strong>{focusedEnergyToFull.toFixed(1)} kWh</strong>
                                         </span>
+                                        <label className="offer-distance-input">
+                                            <small>Trip distance (km)</small>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                step="1"
+                                                value={focusedCharger.distanceRequestKm}
+                                                onChange={(event) =>
+                                                    updateCharger(focusedCharger.id, {
+                                                        distanceRequestKm: Math.max(
+                                                            0,
+                                                            Number(event.target.value),
+                                                        ),
+                                                    })
+                                                }
+                                            />
+                                            <em>Uses model, battery size, and health.</em>
+                                        </label>
                                         <label className="offer-power-input">
                                             <small>Requested power (kW)</small>
                                             <input
@@ -1573,6 +1715,24 @@ export default function Home() {
                                             </button>
                                             );
                                         })}
+                                    </div>
+                                    <div className="offer-recommendation">
+                                        <div>
+                                            <small>Recommended for this trip</small>
+                                            <strong>
+                                                {focusedCharger.distanceRequestKm} km → {recommendedEnergyKwh.toFixed(1)} kWh
+                                            </strong>
+                                            <span>
+                                                ≈ {recommendedMinutes} min · ₹{recommendedCostInr.toFixed(2)} · target {targetSocForEnergy({ ...focusedCharger, targetEnergyKwh: recommendedEnergyKwh }).toFixed(0)}% SOC
+                                            </span>
+                                        </div>
+                                        <button
+                                            className="recommend-button"
+                                            onClick={() => recommendDistancePlan(focusedCharger.id)}
+                                        >
+                                            Use recommendation
+                                        </button>
+                                        <p>Estimate only. The simulator uses the selected vehicle profile, current SOC, and battery health.</p>
                                     </div>
                                     <div className="offer-summary">
                                         <span><small>Tariff</small><strong>₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)}/kWh</strong></span>
@@ -1859,6 +2019,47 @@ export default function Home() {
                             />
                         </label>
                         <label>
+                            Vehicle model
+                            <select
+                                value={vehicleProfileInput}
+                                onChange={(event) => {
+                                    const nextProfile = Number(event.target.value);
+                                    setVehicleProfileInput(event.target.value);
+                                    setStartingSocInput(
+                                        String(VEHICLE_PROFILES[nextProfile]?.startingSoc ?? 0),
+                                    );
+                                }}
+                            >
+                                {VEHICLE_PROFILES.map((profile, index) => (
+                                    <option value={index} key={profile.model}>
+                                        {profile.model} · {profile.batteryKwh} kWh
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                        <label>
+                            Battery health (%)
+                            <input
+                                type="number"
+                                min="1"
+                                max="100"
+                                step="1"
+                                value={batteryHealthInput}
+                                onChange={(event) => setBatteryHealthInput(event.target.value)}
+                            />
+                        </label>
+                        <label>
+                            Current charge (%)
+                            <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={startingSocInput}
+                                onChange={(event) => setStartingSocInput(event.target.value)}
+                            />
+                        </label>
+                        <label>
                             Max power request (kW)
                             <input
                                 type="number"
@@ -1868,6 +2069,16 @@ export default function Home() {
                                 onChange={(event) =>
                                     setRequestedPowerInput(event.target.value)
                                 }
+                            />
+                        </label>
+                        <label>
+                            Departure window (minutes)
+                            <input
+                                type="number"
+                                min="1"
+                                step="1"
+                                value={departureMinutesInput}
+                                onChange={(event) => setDepartureMinutesInput(event.target.value)}
                             />
                         </label>
                         <button type="submit" className="primary-button">
