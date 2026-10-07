@@ -9,16 +9,45 @@ type Demand = {
     maxPowerKw: number;
 };
 
+export type AllocationPolicy = "fcfs" | "equal-share" | "demand-weighted";
+
 export type LoadBalancerResponse = {
+    policy?: AllocationPolicy;
     sitePowerLimitKw: number;
+    totalRequestedPowerKw?: number;
     totalAllocatedPowerKw: number;
-    allocations: Array<{ chargerId: string; allocatedPowerKw: number }>;
+    allocations: Array<{
+        chargerId: string;
+        requestedPowerKw?: number;
+        allocatedPowerKw: number;
+        demandSharePct?: number;
+        unmetPowerKw?: number;
+        reason?: string;
+    }>;
 };
 
 const loadBalancerUrl = process.env.LOAD_BALANCER_URL ?? "http://localhost:8787";
 const defaultPowerKw = Number(process.env.CHARGER_MAX_POWER_KW ?? 50);
+const defaultAllocationPolicy: AllocationPolicy = "demand-weighted";
+const allocationPolicies = new Map<number, AllocationPolicy>();
 const pending = new Set<number>();
 const running = new Map<number, Promise<LoadBalancerResponse | undefined>>();
+const pauseOnNextRebalance = new Set<number>();
+
+export function getSiteAllocationPolicy(siteId: number): AllocationPolicy {
+    return allocationPolicies.get(siteId) ?? defaultAllocationPolicy;
+}
+
+export function setSiteAllocationPolicy(
+    siteId: number,
+    policy: string,
+): AllocationPolicy {
+    if (policy !== "fcfs" && policy !== "equal-share" && policy !== "demand-weighted") {
+        throw new Error("Unsupported allocation policy");
+    }
+    allocationPolicies.set(siteId, policy);
+    return policy;
+}
 
 function profilePayload(connectorId: number, powerKw: number) {
     return {
@@ -70,7 +99,10 @@ function validatedAllocations(
     return allocations;
 }
 
-async function rebalanceOnce(siteId: number): Promise<LoadBalancerResponse> {
+async function rebalanceOnce(
+    siteId: number,
+    pauseFirst: boolean,
+): Promise<LoadBalancerResponse> {
     if (!Number.isFinite(defaultPowerKw) || defaultPowerKw < 0) {
         throw new Error("CHARGER_MAX_POWER_KW must be non-negative");
     }
@@ -85,6 +117,9 @@ async function rebalanceOnce(siteId: number): Promise<LoadBalancerResponse> {
     if (!site) throw new Error(`Site ${siteId} was not found`);
 
     const liveState = new Map(getAllChargers().map((charger) => [charger.chargerId, charger]));
+    const arrivalOrder = new Map(
+        getAllChargers().map((charger, index) => [charger.chargerId, index]),
+    );
     const siteChargers = chargers.filter((charger) =>
         charger.siteId === siteId && charger.connected &&
         liveState.get(charger.chargePointId)?.connected,
@@ -106,9 +141,17 @@ async function rebalanceOnce(siteId: number): Promise<LoadBalancerResponse> {
             (liveState.get(charger.chargePointId)?.requestedPowerKw ?? defaultPowerKw);
         demands.push({ chargerId: charger.chargePointId, requestedPowerKw, maxPowerKw: requestedPowerKw });
     }
+    demands.sort(
+        (left, right) =>
+            (arrivalOrder.get(left.chargerId) ?? Number.MAX_SAFE_INTEGER) -
+            (arrivalOrder.get(right.chargerId) ?? Number.MAX_SAFE_INTEGER),
+    );
 
+    const policy = getSiteAllocationPolicy(siteId);
     let allocation: LoadBalancerResponse = {
+        policy,
         sitePowerLimitKw: site.powerLimitKw,
+        totalRequestedPowerKw: 0,
         totalAllocatedPowerKw: 0,
         allocations: [],
     };
@@ -116,7 +159,11 @@ async function rebalanceOnce(siteId: number): Promise<LoadBalancerResponse> {
         const response = await fetch(`${loadBalancerUrl}/v1/allocate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sitePowerLimitKw: site.powerLimitKw, activeChargers: demands }),
+            body: JSON.stringify({
+                sitePowerLimitKw: site.powerLimitKw,
+                policy,
+                activeChargers: demands,
+            }),
             signal: AbortSignal.timeout(5000),
         });
         if (!response.ok) throw new Error(`Load balancer returned HTTP ${response.status}`);
@@ -131,36 +178,60 @@ async function rebalanceOnce(siteId: number): Promise<LoadBalancerResponse> {
         next: target.get(charger.chargerId) ?? 0,
     }));
 
-    // Apply decreases before increases so a rebalance does not briefly overdraw the site.
-    for (const change of [
-        ...changes.filter((change) => change.next < change.previous),
-        ...changes.filter((change) => change.next > change.previous),
-    ]) {
-        const payload = profilePayload(change.connectorId, change.next);
-        const response = await sendChargerCall(
-            change.chargerId,
-            "SetChargingProfile",
-            payload,
-        );
+    const applyProfile = async (
+        chargerId: string,
+        connectorId: number,
+        powerKw: number,
+    ) => {
+        const payload = profilePayload(connectorId, powerKw);
+        const response = await sendChargerCall(chargerId, "SetChargingProfile", payload);
         if (!response || typeof response !== "object" ||
             (response as { status?: unknown }).status !== "Accepted") {
-            throw new Error(`${change.chargerId} rejected SetChargingProfile`);
+            throw new Error(`${chargerId} rejected SetChargingProfile`);
         }
         await db.orm.public.OcppMessage.create({
             messageId: `profile:${crypto.randomUUID()}`,
             action: "SetChargingProfile",
             direction: "outbound",
             payload: payload as JsonValue,
-            chargerId: siteChargers.find((item) => item.chargePointId === change.chargerId)!.id,
+            chargerId: siteChargers.find((item) => item.chargePointId === chargerId)!.id,
         });
-        updateChargerAllocation(change.chargerId, change.next);
-        console.log(`Charging profile applied to ${change.chargerId}: ${change.next} kW`);
+        updateChargerAllocation(chargerId, powerKw);
+        console.log(`Charging profile applied to ${chargerId}: ${powerKw} kW`);
+    };
+
+    if (pauseFirst) {
+        for (const change of changes.filter((item) => item.previous > 0)) {
+            await applyProfile(change.chargerId, change.connectorId, 0);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 650));
     }
-    console.log(`Go allocation for site ${siteId}: ${[...target.values()].reduce((sum, power) => sum + power, 0)}/${site.powerLimitKw} kW`);
+
+    // Apply decreases before increases so a rebalance does not briefly overdraw the site.
+    const changesToApply = pauseFirst
+        ? changes.filter((change) => change.next > 0)
+        : [
+              ...changes.filter((change) => change.next < change.previous),
+              ...changes.filter((change) => change.next > change.previous),
+          ];
+    for (const change of changesToApply) {
+        await applyProfile(change.chargerId, change.connectorId, change.next);
+    }
+    console.log(
+        `Go ${policy} allocation for site ${siteId}: ` +
+        `${allocation.totalRequestedPowerKw ?? 0} requested → ` +
+        `${[...target.values()].reduce((sum, power) => sum + power, 0)}/${site.powerLimitKw} kW`,
+    );
     return allocation;
 }
 
-export function rebalanceSite(siteId: number): Promise<LoadBalancerResponse | undefined> {
+export function rebalanceSite(
+    siteId: number,
+    pauseFirst = false,
+): Promise<LoadBalancerResponse | undefined> {
+    if (pauseFirst) {
+        pauseOnNextRebalance.add(siteId);
+    }
     pending.add(siteId);
     const current = running.get(siteId);
     if (current) return current;
@@ -170,7 +241,10 @@ export function rebalanceSite(siteId: number): Promise<LoadBalancerResponse | un
         do {
             pending.delete(siteId);
             try {
-                allocation = await rebalanceOnce(siteId);
+                allocation = await rebalanceOnce(
+                    siteId,
+                    pauseOnNextRebalance.delete(siteId),
+                );
             } catch (error) {
                 console.error(`Load balancing failed for site ${siteId}:`, error);
             }

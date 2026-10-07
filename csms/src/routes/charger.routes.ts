@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import { getAllChargers } from "../modules/chargers/charger-state";
-import { rebalanceSite } from "../modules/load-balancer/load-balancer-client";
+import {
+    getSiteAllocationPolicy,
+    rebalanceSite,
+    setSiteAllocationPolicy,
+} from "../modules/load-balancer/load-balancer-client";
 import { db } from "../infrastructure/database/db";
 
 export const chargerRoutes = new Hono();
@@ -83,7 +87,12 @@ chargerRoutes.get("/site", async (c) => {
             return c.json({ error: "Site not configured" }, 404);
         }
 
-        return c.json({ site });
+        return c.json({
+            site: {
+                ...site,
+                allocationPolicy: getSiteAllocationPolicy(site.id),
+            },
+        });
     } catch (error) {
         console.error("Failed to load site configuration:", error);
         return c.json({ error: "Could not load site configuration" }, 500);
@@ -136,6 +145,25 @@ chargerRoutes.patch("/site", async (c) => {
     } catch (error) {
         console.error("Failed to update site configuration:", error);
         return c.json({ error: "Could not update site configuration" }, 500);
+    }
+});
+
+chargerRoutes.patch("/site/policy", async (c) => {
+    const payload = await c.req.json<{ policy?: unknown }>().catch(() => null);
+    if (!payload || typeof payload.policy !== "string") {
+        return c.json({ error: "Invalid allocation policy" }, 400);
+    }
+
+    try {
+        const site = await db.orm.public.Site.select("id").first();
+        if (!site) return c.json({ error: "Site not configured" }, 404);
+
+        const policy = setSiteAllocationPolicy(site.id, payload.policy);
+        await rebalanceSite(site.id, true);
+        return c.json({ allocationPolicy: policy });
+    } catch (error) {
+        console.error("Failed to switch allocation policy:", error);
+        return c.json({ error: error instanceof Error ? error.message : "Could not switch allocation policy" }, 400);
     }
 });
 
