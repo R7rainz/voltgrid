@@ -18,15 +18,33 @@ import (
 const maxRequestBytes = 1 << 20
 
 type chargerRequest struct {
-	ChargerID        string  `json:"chargerId"`
-	RequestedPowerKw float64 `json:"requestedPowerKw"`
-	MaxPowerKw       float64 `json:"maxPowerKw"`
+	ChargerID          string  `json:"chargerId"`
+	RequestedPowerKw   float64 `json:"requestedPowerKw"`
+	MaxPowerKw         float64 `json:"maxPowerKw"`
+	FeederID           string  `json:"feederId,omitempty"`
+	EnergyRequiredKwh  float64 `json:"energyRequiredKwh,omitempty"`
+	EnergyDeliveredKwh float64 `json:"energyDeliveredKwh,omitempty"`
+	DepartureAt        string  `json:"departureAt,omitempty"`
+	Priority           float64 `json:"priority,omitempty"`
+}
+
+type feederLimit struct {
+	FeederID     string  `json:"feederId"`
+	PowerLimitKw float64 `json:"powerLimitKw"`
 }
 
 type allocationRequest struct {
 	SitePowerLimitKw float64          `json:"sitePowerLimitKw"`
 	ActiveChargers   []chargerRequest `json:"activeChargers"`
 	Policy           string           `json:"policy,omitempty"`
+	FeederLimits     []feederLimit    `json:"feederLimits,omitempty"`
+}
+
+type feederAllocation struct {
+	FeederID         string  `json:"feederId"`
+	PowerLimitKw     float64 `json:"powerLimitKw"`
+	RequestedPowerKw float64 `json:"requestedPowerKw"`
+	AllocatedPowerKw float64 `json:"allocatedPowerKw"`
 }
 
 type chargerAllocation struct {
@@ -44,12 +62,16 @@ type allocationResponse struct {
 	TotalRequestedPowerKw float64             `json:"totalRequestedPowerKw"`
 	TotalAllocatedPowerKw float64             `json:"totalAllocatedPowerKw"`
 	Allocations           []chargerAllocation `json:"allocations"`
+	EffectivePowerLimitKw float64             `json:"effectivePowerLimitKw"`
+	ConstraintPath        string              `json:"constraintPath"`
+	Feeders               []feederAllocation  `json:"feeders"`
 }
 
 const (
 	policyFCFS           = "fcfs"
 	policyEqualShare     = "equal-share"
 	policyDemandWeighted = "demand-weighted"
+	policyDeadlineAware  = "deadline-aware"
 )
 
 func main() {
@@ -148,6 +170,7 @@ func allocateHandler(response http.ResponseWriter, request *http.Request) {
 	for _, allocation := range allocations {
 		totalRequested += allocation.RequestedPowerKw
 	}
+	effectiveLimit, feeders := treeSummary(input, allocations)
 
 	writeJSON(response, http.StatusOK, allocationResponse{
 		Policy:                policy,
@@ -155,6 +178,9 @@ func allocateHandler(response http.ResponseWriter, request *http.Request) {
 		TotalRequestedPowerKw: totalRequested,
 		TotalAllocatedPowerKw: total,
 		Allocations:           allocations,
+		EffectivePowerLimitKw: effectiveLimit,
+		ConstraintPath:        "site → feeder → charger",
+		Feeders:               feeders,
 	})
 }
 
@@ -169,6 +195,9 @@ func allocate(input allocationRequest) ([]chargerAllocation, float64, error) {
 
 	policy, err := normalizePolicy(input.Policy)
 	if err != nil {
+		return nil, 0, err
+	}
+	if err := validateFeederLimits(input.FeederLimits); err != nil {
 		return nil, 0, err
 	}
 
@@ -192,6 +221,16 @@ func allocate(input allocationRequest) ([]chargerAllocation, float64, error) {
 			!isFiniteNonNegative(charger.MaxPowerKw) {
 			return nil, 0, errors.New("charger power values must be finite and non-negative")
 		}
+		if !isFiniteNonNegative(charger.EnergyRequiredKwh) ||
+			!isFiniteNonNegative(charger.EnergyDeliveredKwh) ||
+			!isFiniteNonNegative(charger.Priority) {
+			return nil, 0, errors.New("charger energy and priority values must be finite and non-negative")
+		}
+		if charger.DepartureAt != "" {
+			if _, err := time.Parse(time.RFC3339, charger.DepartureAt); err != nil {
+				return nil, 0, errors.New("departureAt must be an RFC3339 timestamp")
+			}
+		}
 
 		demands[index] = math.Min(charger.RequestedPowerKw, charger.MaxPowerKw)
 		totalDemand += demands[index]
@@ -201,24 +240,31 @@ func allocate(input allocationRequest) ([]chargerAllocation, float64, error) {
 		}
 	}
 
-	switch policy {
-	case policyFCFS:
-		remainingPower := input.SitePowerLimitKw
-		for index, demand := range demands {
-			allocations[index].AllocatedPowerKw = math.Min(demand, remainingPower)
-			remainingPower -= allocations[index].AllocatedPowerKw
-		}
-	case policyEqualShare:
-		allocateEqualShare(input.SitePowerLimitKw, demands, allocations)
-	case policyDemandWeighted:
-		for index, demand := range demands {
-			if totalDemand <= input.SitePowerLimitKw {
-				allocations[index].AllocatedPowerKw = demand
-				continue
+	effectiveLimit, feederCapacities := treeCapacity(input)
+	feederIndexes := groupByFeeder(input.ActiveChargers)
+	feederDemands := make([]float64, 0, len(feederIndexes))
+	feederLimits := make([]float64, 0, len(feederIndexes))
+	for _, feederID := range feederIndexes {
+		requested := 0.0
+		for index, charger := range input.ActiveChargers {
+			if normalizedFeederID(charger.FeederID) == feederID {
+				requested += demands[index]
 			}
-			allocations[index].AllocatedPowerKw =
-				input.SitePowerLimitKw * demand / totalDemand
 		}
+		feederDemands = append(feederDemands, requested)
+		feederLimits = append(feederLimits, feederCapacities[feederID])
+	}
+	feederAllocations := make([]float64, len(feederIndexes))
+	allocateTreeChildren(effectiveLimit, feederDemands, feederLimits, feederAllocations)
+
+	for feederIndex, feederID := range feederIndexes {
+		indexes := make([]int, 0)
+		for index, charger := range input.ActiveChargers {
+			if normalizedFeederID(charger.FeederID) == feederID {
+				indexes = append(indexes, index)
+			}
+		}
+		allocatePolicy(feederAllocations[feederIndex], indexes, demands, input.ActiveChargers, allocations, policy)
 	}
 
 	total := 0.0
@@ -237,8 +283,8 @@ func allocate(input allocationRequest) ([]chargerAllocation, float64, error) {
 		total += allocation.AllocatedPowerKw
 	}
 
-	if total > input.SitePowerLimitKw {
-		scale := input.SitePowerLimitKw / total
+	if total > effectiveLimit {
+		scale := effectiveLimit / total
 		for index := range allocations {
 			allocations[index].AllocatedPowerKw *= scale
 			allocations[index].UnmetPowerKw = math.Max(
@@ -246,7 +292,7 @@ func allocate(input allocationRequest) ([]chargerAllocation, float64, error) {
 				allocations[index].RequestedPowerKw-allocations[index].AllocatedPowerKw,
 			)
 		}
-		total = input.SitePowerLimitKw
+		total = effectiveLimit
 	}
 
 	return allocations, total, nil
@@ -259,50 +305,222 @@ func normalizePolicy(policy string) (string, error) {
 	}
 
 	switch policy {
-	case policyFCFS, policyEqualShare, policyDemandWeighted:
+	case policyFCFS, policyEqualShare, policyDemandWeighted, policyDeadlineAware:
 		return policy, nil
 	default:
 		return "", errors.New("unsupported allocation policy: " + policy)
 	}
 }
 
-func allocateEqualShare(
-	capacity float64,
-	demands []float64,
-	allocations []chargerAllocation,
-) {
+func normalizedFeederID(feederID string) string {
+	feederID = strings.TrimSpace(feederID)
+	if feederID == "" {
+		return "main-feeder"
+	}
+	return feederID
+}
+
+func groupByFeeder(chargers []chargerRequest) []string {
+	groups := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, charger := range chargers {
+		feederID := normalizedFeederID(charger.FeederID)
+		if _, ok := seen[feederID]; ok {
+			continue
+		}
+		seen[feederID] = struct{}{}
+		groups = append(groups, feederID)
+	}
+	return groups
+}
+
+func treeCapacity(input allocationRequest) (float64, map[string]float64) {
+	limits := make(map[string]float64)
+	for _, feeder := range input.FeederLimits {
+		limits[normalizedFeederID(feeder.FeederID)] = feeder.PowerLimitKw
+	}
+	for _, feederID := range groupByFeeder(input.ActiveChargers) {
+		if _, exists := limits[feederID]; !exists {
+			limits[feederID] = input.SitePowerLimitKw
+		}
+	}
+	return input.SitePowerLimitKw, limits
+}
+
+func validateFeederLimits(feeders []feederLimit) error {
+	seen := make(map[string]struct{}, len(feeders))
+	for _, feeder := range feeders {
+		feederID := normalizedFeederID(feeder.FeederID)
+		if _, exists := seen[feederID]; exists {
+			return errors.New("feederId values must be unique")
+		}
+		if !isFiniteNonNegative(feeder.PowerLimitKw) {
+			return errors.New("feeder power limits must be finite and non-negative")
+		}
+		seen[feederID] = struct{}{}
+	}
+	return nil
+}
+
+func allocateTreeChildren(capacity float64, demands, limits, result []float64) {
+	capped := make([]float64, len(demands))
+	for index := range demands {
+		capped[index] = math.Min(demands[index], limits[index])
+	}
 	pending := make([]int, 0, len(demands))
-	for index, demand := range demands {
+	for index, demand := range capped {
 		if demand > 0 {
 			pending = append(pending, index)
 		}
 	}
-
 	remaining := capacity
 	const epsilon = 1e-9
 	for len(pending) > 0 && remaining > epsilon {
 		share := remaining / float64(len(pending))
-		nextPending := make([]int, 0, len(pending))
+		next := make([]int, 0, len(pending))
 		used := 0.0
-
 		for _, index := range pending {
-			power := math.Min(
-				demands[index]-allocations[index].AllocatedPowerKw,
-				share,
-			)
-			allocations[index].AllocatedPowerKw += power
+			power := math.Min(capped[index]-result[index], share)
+			result[index] += power
 			used += power
-			if demands[index]-allocations[index].AllocatedPowerKw > epsilon {
-				nextPending = append(nextPending, index)
+			if capped[index]-result[index] > epsilon {
+				next = append(next, index)
 			}
 		}
-
 		if used <= epsilon {
 			return
 		}
 		remaining -= used
-		pending = nextPending
+		pending = next
 	}
+}
+
+func allocatePolicy(capacity float64, indexes []int, demands []float64, chargers []chargerRequest, allocations []chargerAllocation, policy string) {
+	switch policy {
+	case policyFCFS:
+		remaining := capacity
+		for _, index := range indexes {
+			allocations[index].AllocatedPowerKw = math.Min(demands[index], remaining)
+			remaining -= allocations[index].AllocatedPowerKw
+		}
+	case policyEqualShare:
+		allocateEqualShareForIndexes(capacity, indexes, demands, allocations)
+	case policyDeadlineAware:
+		weights := make(map[int]float64, len(indexes))
+		for _, index := range indexes {
+			weights[index] = deadlineWeight(chargers[index], demands[index])
+		}
+		allocateWeightedForIndexes(capacity, indexes, demands, weights, allocations)
+	default:
+		totalDemand := 0.0
+		for _, index := range indexes {
+			totalDemand += demands[index]
+		}
+		for _, index := range indexes {
+			if totalDemand <= capacity {
+				allocations[index].AllocatedPowerKw = demands[index]
+			} else if totalDemand > 0 {
+				allocations[index].AllocatedPowerKw = capacity * demands[index] / totalDemand
+			}
+		}
+	}
+}
+
+func allocateEqualShareForIndexes(capacity float64, indexes []int, demands []float64, allocations []chargerAllocation) {
+	pending := append([]int(nil), indexes...)
+	remaining := capacity
+	const epsilon = 1e-9
+	for len(pending) > 0 && remaining > epsilon {
+		share := remaining / float64(len(pending))
+		next := make([]int, 0, len(pending))
+		used := 0.0
+		for _, index := range pending {
+			power := math.Min(demands[index]-allocations[index].AllocatedPowerKw, share)
+			allocations[index].AllocatedPowerKw += power
+			used += power
+			if demands[index]-allocations[index].AllocatedPowerKw > epsilon {
+				next = append(next, index)
+			}
+		}
+		if used <= epsilon {
+			return
+		}
+		remaining -= used
+		pending = next
+	}
+}
+
+func allocateWeightedForIndexes(capacity float64, indexes []int, demands []float64, weights map[int]float64, allocations []chargerAllocation) {
+	totalWeight := 0.0
+	for _, index := range indexes {
+		totalWeight += math.Max(1, weights[index])
+	}
+	totalDemand := 0.0
+	for _, index := range indexes {
+		totalDemand += demands[index]
+	}
+	if totalDemand <= capacity {
+		for _, index := range indexes {
+			allocations[index].AllocatedPowerKw = demands[index]
+		}
+		return
+	}
+	for _, index := range indexes {
+		allocations[index].AllocatedPowerKw = math.Min(
+			demands[index],
+			capacity*math.Max(1, weights[index])/totalWeight,
+		)
+	}
+}
+
+func deadlineWeight(charger chargerRequest, demand float64) float64 {
+	weight := 1 + charger.Priority
+	remainingEnergy := math.Max(0, charger.EnergyRequiredKwh-charger.EnergyDeliveredKwh)
+	if remainingEnergy <= 0 || demand <= 0 || charger.DepartureAt == "" {
+		return weight
+	}
+	departure, err := time.Parse(time.RFC3339, charger.DepartureAt)
+	if err != nil {
+		return weight
+	}
+	hoursRemaining := math.Max(departure.Sub(time.Now()).Hours(), 1.0/60.0)
+	requiredPower := remainingEnergy / hoursRemaining
+	return weight + math.Min(5, requiredPower/math.Max(demand, 1e-9))
+}
+
+func treeSummary(input allocationRequest, allocations []chargerAllocation) (float64, []feederAllocation) {
+	demands := make(map[string]float64)
+	allocated := make(map[string]float64)
+	for index, charger := range input.ActiveChargers {
+		feederID := normalizedFeederID(charger.FeederID)
+		demands[feederID] += allocations[index].RequestedPowerKw
+		allocated[feederID] += allocations[index].AllocatedPowerKw
+	}
+	limits := make(map[string]float64)
+	for _, feeder := range input.FeederLimits {
+		limits[normalizedFeederID(feeder.FeederID)] = feeder.PowerLimitKw
+	}
+	rows := make([]feederAllocation, 0, len(demands))
+	effective := input.SitePowerLimitKw
+	limitTotal := 0.0
+	for _, feederID := range groupByFeeder(input.ActiveChargers) {
+		requested := demands[feederID]
+		limit, exists := limits[feederID]
+		if !exists {
+			limit = input.SitePowerLimitKw
+		}
+		limitTotal += limit
+		rows = append(rows, feederAllocation{
+			FeederID:         feederID,
+			PowerLimitKw:     limit,
+			RequestedPowerKw: requested,
+			AllocatedPowerKw: allocated[feederID],
+		})
+	}
+	if len(rows) > 0 {
+		effective = math.Min(effective, limitTotal)
+	}
+	return effective, rows
 }
 
 func liveAllocationReason(policy string, allocated, requested, capacity float64) string {
@@ -317,6 +535,11 @@ func liveAllocationReason(policy string, allocated, requested, capacity float64)
 		return "Earlier vehicles consumed the remaining station capacity."
 	case policyEqualShare:
 		return "Available power is shared equally among active vehicles."
+	case policyDeadlineAware:
+		if capacity <= 0 {
+			return "The station has no available power."
+		}
+		return "Weighted by remaining energy, departure time, and vehicle priority."
 	default:
 		if capacity <= 0 {
 			return "The station has no available power."

@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestAllocateRespectsSiteLimit(t *testing.T) {
 	allocations, total, err := allocate(allocationRequest{
@@ -98,5 +101,53 @@ func TestAllocateReclaimsFaultedChargerShare(t *testing.T) {
 	if total != 80 || allocations[0].AllocatedPowerKw != 40 ||
 		allocations[1].AllocatedPowerKw != 40 || allocations[2].AllocatedPowerKw != 0 {
 		t.Fatalf("expected 40/40/0 kW after fault, got %#v (total %.3f)", allocations, total)
+	}
+}
+
+func TestAllocateDeadlineAwarePrioritizesUrgentVehicle(t *testing.T) {
+	allocations, total, err := allocate(allocationRequest{
+		SitePowerLimitKw: 100,
+		Policy:           policyDeadlineAware,
+		ActiveChargers: []chargerRequest{
+			{
+				ChargerID:         "urgent",
+				RequestedPowerKw:  100,
+				MaxPowerKw:        100,
+				EnergyRequiredKwh: 20,
+				DepartureAt:       time.Now().Add(5 * time.Minute).Format(time.RFC3339),
+			},
+			{
+				ChargerID:         "later",
+				RequestedPowerKw:  100,
+				MaxPowerKw:        100,
+				EnergyRequiredKwh: 100,
+				DepartureAt:       time.Now().Add(2 * time.Hour).Format(time.RFC3339),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 100 || allocations[0].AllocatedPowerKw <= allocations[1].AllocatedPowerKw {
+		t.Fatalf("expected urgent vehicle to receive the larger share, got %#v (total %.3f)", allocations, total)
+	}
+	if allocations[0].Reason == "" {
+		t.Fatal("expected an allocation explanation")
+	}
+}
+
+func TestAllocateHonorsFeederLimit(t *testing.T) {
+	allocations, total, err := allocate(allocationRequest{
+		SitePowerLimitKw: 100,
+		FeederLimits:     []feederLimit{{FeederID: "main-feeder", PowerLimitKw: 60}},
+		ActiveChargers: []chargerRequest{
+			{ChargerID: "car", FeederID: "main-feeder", RequestedPowerKw: 100, MaxPowerKw: 100},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 60 || allocations[0].AllocatedPowerKw != 60 {
+		t.Fatalf("expected feeder to cap allocation at 60 kW, got %#v (total %.3f)", allocations, total)
 	}
 }
