@@ -1,3 +1,5 @@
 load-balancer/load-balancer
 load-balancer/*.test
+dashboard/tsconfig.tsbuildinfo
 /updated_phase1Report.pdf
+/VoltGrid_Phase2_Final_Report.pdf

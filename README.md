@@ -11,7 +11,7 @@ Phase 2 branch; hardware control and payment remain simulations.
 - Hono + Bun: CSMS HTTP and WebSocket backend
 - Next.js: operator dashboard and browser charger simulator
 - Prisma ORM Next + PostgreSQL/Neon: durable data
-- Go standard library: fair water-filling load-balancer decision service
+- Go standard library: allocation and policy-comparison decision service
 - Redis: planned for transient live state and pub/sub; not integrated yet
 
 ## Repository layout
@@ -61,6 +61,7 @@ docker compose logs info
 Every service should show `healthy`. Open:
 
 - Dashboard and charger simulator: `http://localhost:9000`
+- Grid Operations Lab: `http://localhost:9000/lab`
 - CSMS health endpoint: `http://localhost:6773/healthz`
 - Go allocator health endpoint: `http://localhost:8787/health`
 - OCPP WebSocket endpoint: `ws://localhost:6773/ocpp/{chargerId}`
@@ -138,6 +139,13 @@ cars. Select **Recover charger** to restore its share. The focused car's
 profile sequence. This is simulated fault handling, not physical charger
 diagnosis, hardware enforcement, or automatic repair. See the
 [Phase demo plan](docs/demo-phases.md) for the exact walkthrough.
+
+The **Grid Operations Lab** runs the same station scenario through three
+policies: first-come-first-served, equal-share water-filling, and
+deadline-aware weighted sharing. It replays building load, solar generation,
+vehicle deadlines, modeled cost, delivery shortfall, and the reason behind each
+allocation. Costs and telemetry are simulation inputs, not utility quotations
+or physical measurements. See the [Grid Operations Lab design](docs/grid-operations-lab.md).
 
 **Run full demo** performs a short accelerated session with meter readings,
 an invoice, and a frontend-only mock payment. No physical charger, actual

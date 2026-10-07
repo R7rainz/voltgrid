@@ -20,6 +20,19 @@ Next.js dashboard :9000
                     Go load balancer :8787
 ```
 
+The dashboard's Grid Operations Lab uses the same CSMS boundary for a
+stateless policy comparison:
+
+~~~text
+Next.js /lab
+     │ POST /api/simulation/compare
+     ▼
+Hono CSMS :6773
+     │ POST /v1/compare
+     ▼
+Go policy evaluator :8787
+~~~
+
 ## Backend responsibilities
 
 ### Hono CSMS
@@ -58,6 +71,13 @@ The browser simulator sends each car's requested power through a VoltGrid
 `DataTransfer` message before starting a session. Hono uses that request for
 allocation; `CHARGER_MAX_POWER_KW` is only a fallback for chargers that do not
 send one. Changing the car's request while charging triggers a rebalance.
+
+The Go policy evaluator exposes POST /v1/compare for the Grid Operations Lab.
+It receives one time-series station scenario and evaluates
+first-come-first-served, equal-share water-filling, and deadline-aware weighted
+sharing. It returns per-step allocations, deadline shortfall, peak site import,
+modeled cost, fairness, and plain-language allocation reasons. It remains
+stateless and does not read PostgreSQL or speak OCPP.
 
 ### Redis
 

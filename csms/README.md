@@ -43,3 +43,9 @@ start and stop events. It applies each returned allocation to a connected
 simulator with an outbound charging-profile command. If the Go service or a
 charger is unavailable, the charging session remains the source-of-truth
 operation and the allocation failure is logged.
+
+The live policy is selected from the dashboard. The available policies are
+`demand-weighted` (default), `equal-share`, and `fcfs`. A policy switch sends
+zero-power profiles first, pauses briefly, then applies the new per-charger
+profiles. The dashboard shows requested, allocated, and unmet power for each
+vehicle.
