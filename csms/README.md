@@ -45,7 +45,9 @@ charger is unavailable, the charging session remains the source-of-truth
 operation and the allocation failure is logged.
 
 The live policy is selected from the dashboard. The available policies are
-`demand-weighted` (default), `equal-share`, and `fcfs`. A policy switch sends
-zero-power profiles first, pauses briefly, then applies the new per-charger
-profiles. The dashboard shows requested, allocated, and unmet power for each
-vehicle.
+`demand-weighted` (default), `equal-share`, `fcfs`, and
+`deadline-aware`. A policy switch sends zero-power profiles first, pauses
+briefly, then applies the new per-charger profiles. The deadline-aware policy
+uses the vehicle's remaining energy, departure window, and priority. The
+dashboard shows the selected policy, requested, allocated, unmet power, and
+allocation reason for each vehicle.

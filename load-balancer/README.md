@@ -31,11 +31,19 @@ Default address: `http://localhost:8787`. Override it with
 {
     "sitePowerLimitKw": 100,
     "policy": "demand-weighted",
+    "feederLimits": [
+        { "feederId": "main-feeder", "powerLimitKw": 100 }
+    ],
     "activeChargers": [
         {
             "chargerId": "sim-car-001",
             "requestedPowerKw": 80,
-            "maxPowerKw": 80
+            "maxPowerKw": 80,
+            "feederId": "main-feeder",
+            "energyRequiredKwh": 20,
+            "energyDeliveredKwh": 0,
+            "departureAt": "2026-10-07T18:00:00Z",
+            "priority": 0
         },
         {
             "chargerId": "sim-car-002",
@@ -56,12 +64,21 @@ The optional `policy` field selects the live algorithm:
 - `equal-share`: water-filling baseline; available power is shared evenly
   and low-demand chargers release unused capacity.
 - `fcfs`: first-come, first-served; input order receives capacity first.
+- `deadline-aware`: weights remaining energy, departure time, and vehicle
+  priority before applying capped weighted sharing.
 
 The response exposes `requestedPowerKw`, `allocatedPowerKw`,
 `demandSharePct`, `unmetPowerKw`, and a human-readable `reason` for every
-charger. Input validation rejects negative, non-finite, duplicate, or empty
-charger data. If total demand is below the site limit, every policy gives
-each charger its full effective demand.
+charger. It also exposes the effective limit, the `site → feeder → charger`
+constraint path, and per-feeder requested/allocated power. Input validation
+rejects negative, non-finite, duplicate, or empty charger/feeder data. If
+total demand is below the applicable tree limits, every policy gives each
+charger its full effective demand.
+
+The tree is intentionally small for VoltGrid: the site is the root, each
+configured feeder is a child, and chargers are leaves. Feeder limits are
+enforced before a leaf policy is applied. With no explicit feeder limit, a
+charger uses the site's limit as its feeder limit.
 
 The Hono CSMS calls this endpoint when active sessions change, then sends each
 returned limit to a connected browser simulator over its WebSocket. The Go

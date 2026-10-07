@@ -3,8 +3,9 @@
 VoltGrid is an EV charging-station management system (CSMS) demonstrated with
 simulated chargers. It connects chargers over OCPP-style WebSockets, persists
 sessions and meter readings in PostgreSQL, generates invoices, and uses a Go
-service to share a site's power budget across active vehicles. This is the
-Phase 2 branch; hardware control and payment remain simulations.
+service to share a site's power budget across active vehicles. The current
+branch contains the integrated Phase 1 and Phase 2 demonstration; hardware
+control and payment remain simulations.
 
 ## Current stack
 
@@ -140,17 +141,25 @@ profile sequence. This is simulated fault handling, not physical charger
 diagnosis, hardware enforcement, or automatic repair. See the
 [Phase demo plan](docs/demo-phases.md) for the exact walkthrough.
 
-The **Grid Operations Lab** runs the same station scenario through three
-policies: first-come-first-served, equal-share water-filling, and
-deadline-aware weighted sharing. It replays building load, solar generation,
-vehicle deadlines, modeled cost, delivery shortfall, and the reason behind each
-allocation. Costs and telemetry are simulation inputs, not utility quotations
-or physical measurements. See the [Grid Operations Lab design](docs/grid-operations-lab.md).
+The **Grid Operations Lab** runs the same station scenario through four
+policies: first-come-first-served, equal-share water-filling,
+demand-weighted sharing, and deadline-aware weighted sharing. It replays
+building load, solar generation, vehicle deadlines, modeled cost, delivery
+shortfall, and the reason behind each allocation. Costs and telemetry are
+simulation inputs, not utility quotations or physical measurements. See the
+[Grid Operations Lab design](docs/grid-operations-lab.md).
 
 **Run full demo** performs a short accelerated session with meter readings,
 an invoice, and a frontend-only mock payment. No physical charger, actual
 energy transfer, or payment settlement is involved. Use manual **Start** to
 keep multiple sessions open while explaining live balancing.
+
+When adding a vehicle, the dashboard now accepts a vehicle model, battery
+health, current state of charge, requested power, and departure window. After
+the vehicle parks, enter the trip distance to get a simulator estimate for
+energy required, charging time, target SOC, and fee. The estimate can be
+accepted or replaced with a manual SOC target. It is based on the selected
+demo profile, not live vehicle telemetry.
 
 ## Documentation
 

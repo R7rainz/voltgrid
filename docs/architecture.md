@@ -74,8 +74,8 @@ send one. Changing the car's request while charging triggers a rebalance.
 
 The Go policy evaluator exposes POST /v1/compare for the Grid Operations Lab.
 It receives one time-series station scenario and evaluates
-first-come-first-served, equal-share water-filling, and deadline-aware weighted
-sharing. It returns per-step allocations, deadline shortfall, peak site import,
+first-come-first-served, equal-share water-filling, demand-weighted, and
+deadline-aware weighted sharing. It returns per-step allocations, deadline shortfall, peak site import,
 modeled cost, fairness, and plain-language allocation reasons. It remains
 stateless and does not read PostgreSQL or speak OCPP.
 
