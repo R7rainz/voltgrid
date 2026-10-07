@@ -13,8 +13,31 @@ const CSMS_WS_URL =
     process.env.NEXT_PUBLIC_CSMS_WS_URL ?? "ws://localhost:6773";
 const DEFAULT_SITE_CAPACITY_KW = 100;
 const DEFAULT_CAR_POWER_KW = 50;
+type AllocationPolicy = "fcfs" | "equal-share" | "demand-weighted";
+
+const ALLOCATION_POLICIES: Array<{
+    id: AllocationPolicy;
+    label: string;
+    description: string;
+}> = [
+    {
+        id: "demand-weighted",
+        label: "Demand weighted",
+        description: "More requested power gets a larger share.",
+    },
+    {
+        id: "equal-share",
+        label: "Equal share",
+        description: "Water-filling baseline for comparison.",
+    },
+    {
+        id: "fcfs",
+        label: "First come first served",
+        description: "Earlier cars consume capacity first.",
+    },
+];
 const CAR_COLORS = ["#2f6fed", "#e45d3f", "#25866f", "#7657c8"];
-const CHARGE_OPTIONS_KWH = [10, 20, 40] as const;
+const TARGET_SOC_OPTIONS = [80, 90, 100] as const;
 const VEHICLE_PROFILES = [
     { model: "VX-1 Electric", batteryKwh: 72, rangeKm: 480, startingSoc: 42 },
     { model: "City E-Cross", batteryKwh: 60, rangeKm: 390, startingSoc: 35 },
@@ -172,10 +195,50 @@ type SimulatedCharger = {
     error?: string;
 };
 
+function deliveredEnergyKwh(charger: SimulatedCharger) {
+    return Math.max(
+        0,
+        (charger.meterWh - (charger.sessionStartWh ?? charger.meterWh)) / 1000,
+    );
+}
+
+function energyForTargetSoc(charger: SimulatedCharger, targetSocPct: number) {
+    return Math.max(
+        0,
+        ((targetSocPct - charger.startingSoc) / 100) * charger.batteryKwh,
+    );
+}
+
+function targetSocForEnergy(charger: SimulatedCharger) {
+    return Math.min(
+        100,
+        charger.startingSoc +
+            (charger.targetEnergyKwh / charger.batteryKwh) * 100,
+    );
+}
+
+function remainingMinutes(charger: SimulatedCharger) {
+    const remainingEnergy = Math.max(
+        0,
+        charger.targetEnergyKwh - deliveredEnergyKwh(charger),
+    );
+    const allocatedPowerKw = charger.allocatedPowerKw ?? 0;
+
+    return allocatedPowerKw > 0
+        ? Math.ceil((remainingEnergy / allocatedPowerKw) * 60)
+        : undefined;
+}
+
 type BlackBoxEvent = {
     id: number;
     at: string;
     kind: string;
+    text: string;
+};
+
+type StationLog = {
+    id: number;
+    at: string;
     text: string;
 };
 
@@ -184,6 +247,7 @@ type SiteSummary = {
     name: string;
     powerLimitKw: number;
     tariffPaisePerKwh: number;
+    allocationPolicy?: AllocationPolicy;
 };
 
 type PendingRequest = {
@@ -317,6 +381,10 @@ export default function Home() {
     const [tariffInput, setTariffInput] = useState("");
     const [siteSaveMessage, setSiteSaveMessage] = useState("");
     const [savingSite, setSavingSite] = useState(false);
+    const [allocationPolicy, setAllocationPolicy] = useState<AllocationPolicy>(
+        "demand-weighted",
+    );
+    const [policySwitching, setPolicySwitching] = useState(false);
     const [chargerId, setChargerId] = useState("demo-car-001");
     const [idTag, setIdTag] = useState("DEMO-DRIVER-001");
     const [connectorId, setConnectorId] = useState("1");
@@ -327,6 +395,7 @@ export default function Home() {
     const [incidentChargerId, setIncidentChargerId] = useState<string>();
     const [blackBoxEvents, setBlackBoxEvents] = useState<BlackBoxEvent[]>([]);
     const [replayStep, setReplayStep] = useState(0);
+    const [stationLogs, setStationLogs] = useState<StationLog[]>([]);
     const sockets = useRef(new Map<string, WebSocket>());
     const pending = useRef(new Map<string, PendingRequest>());
     const arrivalTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -336,6 +405,17 @@ export default function Home() {
     useEffect(() => {
         chargersRef.current = chargers;
     }, [chargers]);
+
+    useEffect(() => {
+        setStationLogs((current) => [
+            {
+                id: Date.now(),
+                at: new Date().toISOString(),
+                text: demoStatus,
+            },
+            ...current,
+        ].slice(0, 30));
+    }, [demoStatus]);
 
     useEffect(() => {
         if (!incidentChargerId) return;
@@ -381,6 +461,9 @@ export default function Home() {
 
                         if (siteData.site) {
                             setSite(siteData.site);
+                            if (siteData.site.allocationPolicy) {
+                                setAllocationPolicy(siteData.site.allocationPolicy);
+                            }
                             setPowerLimitInput((current) =>
                                 current || String(siteData.site?.powerLimitKw ?? ""),
                             );
@@ -736,7 +819,7 @@ export default function Home() {
             setDemoStatus(
                 transactionStatus === "ConcurrentTx"
                     ? `${id} resumed · active transaction recovered`
-                    : `${id} charging · Go allocator calculating a fair share`,
+                    : `${id} charging · Go allocator applying ${allocationPolicy} demand policy`,
             );
         } catch (error) {
             updateCharger(id, {
@@ -893,9 +976,14 @@ export default function Home() {
         await connectCharger(id);
     }
 
-    function selectChargePlan(id: string, targetEnergyKwh: number) {
+    function selectChargePlan(id: string, targetSocPct: number) {
+        const charger = chargersRef.current.find((item) => item.id === id);
+
+        if (!charger) return;
+
+        const targetEnergyKwh = energyForTargetSoc(charger, targetSocPct);
         updateCharger(id, { targetEnergyKwh });
-        setDemoStatus(`${id} · ${targetEnergyKwh} kWh charging plan selected`);
+        setDemoStatus(`${id} · target set to ${targetSocPct}% SOC`);
     }
 
     async function updateActiveDemand(id: string) {
@@ -913,6 +1001,42 @@ export default function Home() {
             setDemoStatus(`${id} demand changed · Go recalculating all active EVs`);
         } catch (error) {
             setDemoStatus(`${id} demand update failed: ${String(error)}`);
+        }
+    }
+
+    async function switchAllocationPolicy(policy: AllocationPolicy) {
+        if (policy === allocationPolicy || policySwitching) return;
+
+        const previousPolicy = allocationPolicy;
+        const activeChargers = chargersRef.current.filter(
+            (charger) => charger.status === "Charging",
+        );
+        setPolicySwitching(true);
+        setAllocationPolicy(policy);
+        activeChargers.forEach((charger) => updateCharger(charger.id, {
+            allocatedPowerKw: 0,
+            allocationUpdatedAt: new Date().toISOString(),
+        }));
+        setDemoStatus(`Charging paused · switching to ${policy}`);
+
+        try {
+            await wait(650);
+            const response = await fetch(`${CSMS_HTTP_URL}/api/site/policy`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ policy }),
+            });
+            const data = await response.json() as { allocationPolicy?: AllocationPolicy; error?: string };
+            if (!response.ok || !data.allocationPolicy) {
+                throw new Error(data.error ?? "Policy switch failed");
+            }
+            setAllocationPolicy(data.allocationPolicy);
+            setDemoStatus(`Policy active · ${data.allocationPolicy} is reallocating every vehicle`);
+        } catch (error) {
+            setAllocationPolicy(previousPolicy);
+            setDemoStatus(`Policy switch failed · ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            setPolicySwitching(false);
         }
     }
 
@@ -1155,12 +1279,7 @@ export default function Home() {
         ? focusedCharger.allocatedPowerKw ?? 0
         : 0;
     const focusedSessionEnergyKwh = focusedCharger
-        ? Math.max(
-              0,
-              (focusedCharger.meterWh -
-                  (focusedCharger.sessionStartWh ?? focusedCharger.meterWh)) /
-                  1000,
-          )
+        ? deliveredEnergyKwh(focusedCharger)
         : 0;
     const focusedSessionCostInr =
         focusedSessionEnergyKwh *
@@ -1178,6 +1297,12 @@ export default function Home() {
                   Math.max(1, focusedCharger.requestedPowerKw)) *
                   60,
           )
+        : 0;
+    const focusedTargetSoc = focusedCharger
+        ? targetSocForEnergy(focusedCharger)
+        : 0;
+    const focusedEnergyToFull = focusedCharger
+        ? energyForTargetSoc(focusedCharger, 100)
         : 0;
     const selectedPlanCostInr = focusedCharger
         ? focusedCharger.targetEnergyKwh *
@@ -1215,6 +1340,9 @@ export default function Home() {
                     <span>VoltGrid</span>
                 </div>
                 <div className="topbar-meta">
+                   <a className="lab-link" href="/lab">
+                        Compare charging policies →
+                   </a>
                     <span className="station-chip">{site?.name ?? "SITE 01"}</span>
                     <span className={`service-pill ${backendOnline ? "online" : "offline"}`}>
                         <span className="status-dot" />
@@ -1251,6 +1379,25 @@ export default function Home() {
                             <span className="scene-kicker">STATION OVERVIEW · 4 CHARGING BAYS</span>
                             <strong>{site?.name ?? "VoltGrid Central"}</strong>
                         </div>
+                        <div className="allocation-policy-hud">
+                            <div>
+                                <small>LIVE ALLOCATION POLICY</small>
+                                <strong>{policySwitching ? "PAUSING TO SWITCH" : allocationPolicy}</strong>
+                            </div>
+                            <div className="policy-buttons" role="group" aria-label="Live allocation policy">
+                                {ALLOCATION_POLICIES.map((policy) => (
+                                    <button
+                                        key={policy.id}
+                                        className={allocationPolicy === policy.id ? "is-active" : ""}
+                                        onClick={() => void switchAllocationPolicy(policy.id)}
+                                        disabled={policySwitching || !backendOnline}
+                                        title={policy.description}
+                                    >
+                                        {policy.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                         <div className="capacity-hud">
                             <span>
                                 <small>Site limit</small>
@@ -1266,6 +1413,7 @@ export default function Home() {
                             </span>
                         </div>
                     </header>
+
 
                     {focusedCharger ? (
                         <>
@@ -1373,8 +1521,20 @@ export default function Home() {
                                             <strong>{focusedCharger.vehicleModel}</strong>
                                         </span>
                                         <span>
-                                            <small>Battery / SOC</small>
-                                            <strong>{focusedCharger.batteryKwh} kWh · {focusedCharger.startingSoc}%</strong>
+                                            <small>Current charge</small>
+                                            <strong>{focusedCharger.startingSoc}% SOC</strong>
+                                        </span>
+                                        <span>
+                                            <small>Target charge</small>
+                                            <strong>{focusedTargetSoc.toFixed(0)}% SOC</strong>
+                                        </span>
+                                        <span>
+                                            <small>Energy needed</small>
+                                            <strong>{focusedCharger.targetEnergyKwh.toFixed(1)} kWh</strong>
+                                        </span>
+                                        <span>
+                                            <small>To full</small>
+                                            <strong>{focusedEnergyToFull.toFixed(1)} kWh</strong>
                                         </span>
                                         <label className="offer-power-input">
                                             <small>Requested power (kW)</small>
@@ -1392,19 +1552,27 @@ export default function Home() {
                                                     })
                                                 }
                                             />
+                                            <em>More power means less charging time.</em>
                                         </label>
                                     </div>
-                                    <div className="plan-options" aria-label="Select energy amount">
-                                        {CHARGE_OPTIONS_KWH.map((energyKwh) => (
+                                    <div className="plan-options" aria-label="Select target state of charge">
+                                        {TARGET_SOC_OPTIONS.map((targetSocPct) => {
+                                            const energyKwh = energyForTargetSoc(
+                                                focusedCharger,
+                                                targetSocPct,
+                                            );
+
+                                            return (
                                             <button
-                                                className={focusedCharger.targetEnergyKwh === energyKwh ? "is-selected" : ""}
-                                                key={energyKwh}
-                                                onClick={() => selectChargePlan(focusedCharger.id, energyKwh)}
+                                                className={Math.abs(focusedTargetSoc - targetSocPct) < 0.5 ? "is-selected" : ""}
+                                                key={targetSocPct}
+                                                onClick={() => selectChargePlan(focusedCharger.id, targetSocPct)}
                                             >
-                                                <strong>{energyKwh} kWh</strong>
-                                                <small>₹{(energyKwh * ((site?.tariffPaisePerKwh ?? 800) / 100)).toFixed(0)}</small>
+                                                <strong>{targetSocPct}% SOC</strong>
+                                                <small>{energyKwh.toFixed(1)} kWh · ₹{(energyKwh * ((site?.tariffPaisePerKwh ?? 800) / 100)).toFixed(0)}</small>
                                             </button>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                     <div className="offer-summary">
                                         <span><small>Tariff</small><strong>₹{((site?.tariffPaisePerKwh ?? 800) / 100).toFixed(2)}/kWh</strong></span>
@@ -1508,7 +1676,7 @@ export default function Home() {
                                         ["EV", focusedCharger.idTag],
                                         ["CHARGER", `Connector ${focusedCharger.connectorId}`],
                                         ["CSMS", "Hono · Bun :6773"],
-                                        ["GO ALLOC", "Fair power share"],
+                                        ["GO ALLOC", `${allocationPolicy} policy`],
                                         ["DATABASE", "PostgreSQL"],
                                     ].map(([label, detail], index) => (
                                         <div className="tunnel-section" key={label}>
@@ -1531,7 +1699,22 @@ export default function Home() {
                                     <i>{focusedCharger.status === "Error" ? "FAILED" : focusedCharger.status === "Faulted" ? "FAULT" : "ACK"}</i>
                                 </div>
                             </details>
-                            ) : null}
+                           ) : null}
+
+                            <details className="station-logs" open>
+                                <summary>
+                                    <span>LIVE STATION LOG</span>
+                                    <strong>{stationLogs.length} events</strong>
+                                </summary>
+                                <div className="station-log-list" aria-live="polite">
+                                    {stationLogs.length === 0 ? <p>Waiting for station events…</p> : stationLogs.map((log) => (
+                                        <div className="station-log-entry" key={log.id}>
+                                            <time>{new Date(log.at).toLocaleTimeString()}</time>
+                                            <span>{log.text}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </details>
 
                             <div className="scene-action-bar">
                                 <div>
@@ -1587,8 +1770,19 @@ export default function Home() {
                                         </span>
                                         {charger.status === "Charging" || charger.status === "Faulted" ? (
                                             <span className={`bay-power-share ${charger.status === "Faulted" ? "is-faulted" : ""}`}>
-                                                <strong>{charger.allocatedPowerKw === undefined ? "CALCULATING" : `${formatPower(charger.allocatedPowerKw)} ALLOCATED`}</strong>
-                                                <small>{charger.status === "Faulted" ? "FAULT · allocation paused" : `Requested ${formatPower(charger.requestedPowerKw)}`}</small>
+                                                <strong>{charger.allocatedPowerKw === undefined ? "CALCULATING" : `${formatPower(charger.allocatedPowerKw)} NOW`}</strong>
+                                               <span className="bay-power-facts">
+                                                   <small>{deliveredEnergyKwh(charger).toFixed(1)} / {charger.targetEnergyKwh.toFixed(1)} kWh</small>
+                                                   <small>{charger.status === "Faulted" ? "FAULT · paused" : `${remainingMinutes(charger) ?? "—"} min left`}</small>
+                                                    <small>{projectedDemandKw > 0 ? `${((charger.requestedPowerKw / projectedDemandKw) * 100).toFixed(0)}% of active demand` : "No active demand"}</small>
+                                               </span>
+                                               <em>
+                                                   {charger.status === "Faulted"
+                                                       ? "Station paused this vehicle after a fault."
+                                                       : (charger.allocatedPowerKw ?? 0) < charger.requestedPowerKw
+                                                          ? `${allocationPolicy}: ${formatPower(charger.requestedPowerKw)} requested, ${formatPower(charger.allocatedPowerKw ?? 0)} allocated.`
+                                                          : `${allocationPolicy}: full requested power is available.`}
+                                               </em>
                                                 <i><b style={{ width: `${charger.requestedPowerKw > 0 ? Math.min(100, ((charger.allocatedPowerKw ?? 0) / charger.requestedPowerKw) * 100) : 0}%` }} /></i>
                                             </span>
                                         ) : null}
@@ -1613,7 +1807,7 @@ export default function Home() {
 
                     {unmetDemandKw > 0 ? (
                         <div className="power-warning" role="status">
-                            <strong>GO BALANCER SHARING POWER</strong>
+                            <strong>{allocationPolicy.toUpperCase()} ALLOCATION</strong>
                             <span>
                                 {formatPower(projectedDemandKw)} requested · {formatPower(suppliedPowerKw)} allocated · {formatPower(unmetDemandKw)} unmet
                             </span>
@@ -1814,10 +2008,10 @@ export default function Home() {
                                     </div>
                                     {charger.status === "Charging" ? (
                                         <div className="station-power-message" role="status">
-                                            <span>Live smart charging · Go → CSMS → OCPP</span>
+                                            <span>Live {allocationPolicy} policy · Go → CSMS → OCPP</span>
                                             <strong>{formatPower(charger.allocatedPowerKw ?? 0)} of {formatPower(charger.requestedPowerKw)} requested</strong>
                                             <p>
-                                                Fair water-filling shares the {formatPower(siteCapacityKw)} site limit across active EVs. The charger acknowledged this SetChargingProfile limit.
+                                                Go compares each vehicle demand, selects the {allocationPolicy} policy, and sends this car its SetChargingProfile limit.
                                             </p>
                                             <label>Change demand (kW)
                                                 <input type="number" min="0" step="any" value={charger.requestedPowerKw}
