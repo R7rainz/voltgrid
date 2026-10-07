@@ -1,6 +1,6 @@
 # VoltGrid load balancer
 
-This service calculates fair site-power allocations for active EV chargers.
+This service calculates policy-based site-power allocations for active EV chargers.
 It is a decision service called by the Hono CSMS; it does not connect to
 PostgreSQL or speak OCPP directly.
 
@@ -30,6 +30,7 @@ Default address: `http://localhost:8787`. Override it with
 ```json
 {
     "sitePowerLimitKw": 100,
+    "policy": "demand-weighted",
     "activeChargers": [
         {
             "chargerId": "sim-car-001",
@@ -48,14 +49,47 @@ Default address: `http://localhost:8787`. Override it with
 The response contains one allocation per charger and the total allocation. In
 the example, both chargers receive `50 kW`, and the total is `100 kW`.
 
-The allocator uses a fair water-filling strategy: low-demand chargers receive
-their full demand first, and the remaining capacity is shared equally among
-the rest. Input validation rejects negative, non-finite, duplicate, or empty
-charger data.
+The optional `policy` field selects the live algorithm:
+
+- `demand-weighted` (default): if overloaded, each charger receives a
+  proportion of the site limit based on its effective demand.
+- `equal-share`: water-filling baseline; available power is shared evenly
+  and low-demand chargers release unused capacity.
+- `fcfs`: first-come, first-served; input order receives capacity first.
+
+The response exposes `requestedPowerKw`, `allocatedPowerKw`,
+`demandSharePct`, `unmetPowerKw`, and a human-readable `reason` for every
+charger. Input validation rejects negative, non-finite, duplicate, or empty
+charger data. If total demand is below the site limit, every policy gives
+each charger its full effective demand.
 
 The Hono CSMS calls this endpoint when active sessions change, then sends each
 returned limit to a connected browser simulator over its WebSocket. The Go
 service itself remains stateless and does not control physical hardware.
+
+## Policy comparison lab
+
+The supervisor-facing Grid Operations Lab uses POST /v1/compare to replay
+the same site conditions against four policies:
+
+- fcfs: first-come, first-served baseline; early vehicles can consume the
+  available site power.
+- equal-share: fair water-filling; active vehicles share the available power
+  without exceeding the site limit.
+- demand-weighted: vehicles receive power proportional to their active demand.
+- deadline-aware: gives more weight to vehicles with less time remaining,
+  higher priority, and a larger unmet energy requirement.
+
+The request includes the site limit, building load, solar contribution, tariff,
+vehicle arrival/departure windows, required energy, maximum power, and
+priority. The response includes a time-step trace, per-vehicle delivery and
+deadline status, peak grid import, fairness, and modeled energy plus demand
+cost. These costs are a simulation tool for comparing policies, not billing
+or a claim about a utility tariff.
+
+The Hono proxy exposes the same comparison at
+POST /api/simulation/compare, so the dashboard can run the lab without
+connecting the browser directly to the Go service.
 
 ## Checks
 

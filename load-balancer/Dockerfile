@@ -2,7 +2,8 @@ FROM golang:1.27-alpine AS builder
 
 WORKDIR /src
 
-COPY go.mod main.go ./
+COPY go.mod ./
+COPY *.go ./
 RUN go build -o /out/voltgrid-load-balancer .
 
 FROM alpine:3.22
